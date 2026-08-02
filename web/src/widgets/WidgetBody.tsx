@@ -34,6 +34,24 @@ function Chart({ spec, widgetId }: { spec: ChartSpec; widgetId: string }) {
     }
   }, [view, theme, animate]);
 
+  // Presentation mode re-runs the entrance animation when a row is revealed.
+  useEffect(() => {
+    const node = el.current;
+    if (!node) return;
+    const replay = () => {
+      const c = chart.current;
+      if (!c) return;
+      c.clear();
+      try {
+        c.setOption(specToOption(view, theme, true));
+      } catch {
+        /* keep presenting */
+      }
+    };
+    node.addEventListener("vision:replay", replay);
+    return () => node.removeEventListener("vision:replay", replay);
+  }, [view, theme]);
+
   return <div className="chart-mount" ref={el} />;
 }
 

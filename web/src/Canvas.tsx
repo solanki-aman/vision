@@ -12,6 +12,8 @@ const CONFIDENCE_LABEL = {
 
 interface Props {
   widgets: Widget[];
+  /** Present mode: rows with y above this stay hidden. null = not presenting. */
+  revealY: number | null;
   onLayoutChange: (ops: { kind: "move_widget" | "resize_widget"; widgetId: string; x?: number; y?: number; w?: number; h?: number }[]) => void;
   onRemove: (widgetId: string) => void;
 }
@@ -24,7 +26,7 @@ function columnsFor(width: number) {
   return FULL_COLUMNS;
 }
 
-export function Canvas({ widgets, onLayoutChange, onRemove }: Props) {
+export function Canvas({ widgets, revealY, onLayoutChange, onRemove }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const grid = useRef<GridStack | null>(null);
   const items = useRef(new Map<string, HTMLDivElement>());
@@ -152,7 +154,11 @@ export function Canvas({ widgets, onLayoutChange, onRemove }: Props) {
             if (el) items.current.set(w.id, el);
           }}
         >
-          <div className={`grid-stack-item-content widget kind-${w.kind} ${fresh.has(w.id) ? "arriving" : ""}`}>
+          <div
+            className={`grid-stack-item-content widget kind-${w.kind} ${fresh.has(w.id) ? "arriving" : ""} ${
+              revealY !== null && (w.y ?? 0) > revealY ? "unrevealed" : ""
+            }`}
+          >
             {w.kind !== "label" && w.kind !== "hero" && (
             <header className="widget-grip">
               <h3 title={w.title}>{w.title}</h3>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import type { UIMessage } from "ai";
@@ -94,6 +94,60 @@ function CanvasView({ canvasId, onTitle }: { canvasId: string; onTitle: (t: stri
 
   const empty = state.widgets.length === 0;
 
+  // Presentation mode: the canvas plays row by row.
+  const [present, setPresent] = useState(false);
+  const [step, setStep] = useState(0);
+  const rowYs = useMemo(
+    () => [...new Set(state.widgets.map((w) => w.y ?? 0))].sort((a, b) => a - b),
+    [state.widgets],
+  );
+  const revealY = present ? (rowYs[Math.min(step, rowYs.length - 1)] ?? 0) : null;
+
+  const enterPresent = () => {
+    setStep(0);
+    setPresent(true);
+  };
+  const exitPresent = useCallback(() => setPresent(false), []);
+
+  const goto = useCallback(
+    (next: number) => {
+      const clamped = Math.max(0, Math.min(rowYs.length - 1, next));
+      setStep(clamped);
+      const y = rowYs[clamped];
+      const first = state.widgets
+        .filter((w) => (w.y ?? 0) === y)
+        .sort((a, b) => (a.x ?? 0) - (b.x ?? 0))[0];
+      if (!first) return;
+      const el = document.querySelector(`[data-widget-id="${first.id}"]`);
+      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+      // Let the fade-in start, then replay chart entrances for the revealed row.
+      setTimeout(() => {
+        for (const w of state.widgets.filter((w) => (w.y ?? 0) === y)) {
+          document
+            .querySelector(`[data-widget-id="${w.id}"] .chart-mount`)
+            ?.dispatchEvent(new CustomEvent("vision:replay"));
+        }
+      }, 240);
+    },
+    [rowYs, state.widgets],
+  );
+
+  useEffect(() => {
+    if (!present) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") exitPresent();
+      else if (e.key === "ArrowRight" || e.key === " " || e.key === "Enter") {
+        e.preventDefault();
+        goto(step + 1);
+      } else if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        goto(step - 1);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [present, step, goto, exitPresent]);
+
   // Per-canvas identity chosen by the agent: accent, display voice, paper, card treatment.
   const style: CanvasStyle | null = state.canvas?.style ?? null;
   const DISPLAY: Record<string, string> = {
@@ -114,7 +168,11 @@ function CanvasView({ canvasId, onTitle }: { canvasId: string; onTitle: (t: stri
 
   return (
     <FilterProvider>
-    <div className={`stage ${railOpen ? "" : "wide"}`} data-cards={style?.cards ?? "bordered"} style={styleVars}>
+    <div
+      className={`stage ${present ? "presenting" : railOpen ? "" : "wide"}`}
+      data-cards={style?.cards ?? "bordered"}
+      style={styleVars}
+    >
       <div className="board">
         {empty && !busy && (
           <div className="board-empty">
@@ -130,8 +188,14 @@ function CanvasView({ canvasId, onTitle }: { canvasId: string; onTitle: (t: stri
             </div>
           </div>
         )}
+        {!empty && !present && (
+          <button className="present-launch" title="Present this canvas" onClick={enterPresent}>
+            ▶ present
+          </button>
+        )}
         <Canvas
           widgets={state.widgets}
+          revealY={revealY}
           onLayoutChange={applyOps}
           onRemove={(widgetId) => applyOps([{ kind: "remove_widget", widgetId }])}
         />
@@ -142,7 +206,26 @@ function CanvasView({ canvasId, onTitle }: { canvasId: string; onTitle: (t: stri
         )}
       </div>
 
-      <StreamRail messages={messages} busy={busy} open={railOpen} onToggle={() => setRailOpen((v) => !v)} />
+      {!present && (
+        <StreamRail messages={messages} busy={busy} open={railOpen} onToggle={() => setRailOpen((v) => !v)} />
+      )}
+
+      {present && (
+        <div className="present-bar">
+          <button onClick={() => goto(step - 1)} disabled={step === 0} aria-label="Previous">
+            ‹
+          </button>
+          <span className="present-count">
+            {step + 1} / {rowYs.length}
+          </span>
+          <button onClick={() => goto(step + 1)} disabled={step >= rowYs.length - 1} aria-label="Next">
+            ›
+          </button>
+          <button className="present-exit" onClick={exitPresent}>
+            exit
+          </button>
+        </div>
+      )}
 
       <div className="dock">
         {error && <div className="dock-error">{error.message}</div>}
