@@ -1,87 +1,243 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useChat } from "@ai-sdk/react";
+import { DefaultChatTransport } from "ai";
 import type { UIMessage } from "ai";
-import { Chat } from "./components/Chat";
+import { Canvas } from "./Canvas";
+import { StreamRail } from "./StreamRail";
+import type { CanvasState } from "./types";
 
-interface Conversation {
+interface CanvasListItem {
   id: string;
   title: string;
+  widget_count: string;
   updated_at: string;
 }
 
-export default function App() {
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(null);
-  const [initialMessages, setInitialMessages] = useState<UIMessage[] | null>(null);
+const PROMPTS = [
+  "Where is the AI capex actually going?",
+  "Show me the shape of the housing market right now",
+  "What does a great week of sleep look like?",
+  "Compare the last four SpaceX launch cadences",
+];
 
-  const refresh = useCallback(async () => {
-    const res = await fetch("/api/conversations");
-    setConversations(await res.json());
+function CanvasView({ canvasId, onTitle }: { canvasId: string; onTitle: (t: string) => void }) {
+  const [state, setState] = useState<CanvasState>({ canvas: null, widgets: [] });
+  const [railOpen, setRailOpen] = useState(true);
+  const [input, setInput] = useState("");
+  const [initial, setInitial] = useState<UIMessage[] | null>(null);
+  const box = useRef<HTMLTextAreaElement>(null);
+
+  const refetch = useCallback(async () => {
+    const res = await fetch(`/api/canvases/${canvasId}`);
+    const next: CanvasState = await res.json();
+    setState(next);
+    if (next.canvas) onTitle(next.canvas.title);
+  }, [canvasId, onTitle]);
+
+  useEffect(() => {
+    refetch();
+    fetch(`/api/canvases/${canvasId}/messages`)
+      .then((r) => r.json())
+      .then((rows) => setInitial(rows as UIMessage[]));
+  }, [canvasId, refetch]);
+
+  useEffect(() => {
+    const es = new EventSource(`/api/canvases/${canvasId}/events`);
+    es.onmessage = () => refetch();
+    return () => es.close();
+  }, [canvasId, refetch]);
+
+  const { messages, sendMessage, status, error } = useChat({
+    id: canvasId,
+    messages: initial ?? [],
+    transport: new DefaultChatTransport({ api: "/api/chat", body: { canvasId } }),
+  });
+
+  const busy = status === "submitted" || status === "streaming";
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        box.current?.focus();
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === "z") {
+        e.preventDefault();
+        fetch(`/api/canvases/${canvasId}/undo`, { method: "POST" }).then(refetch);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [canvasId, refetch]);
+
+  const send = (text: string) => {
+    if (!text.trim() || busy) return;
+    sendMessage({ text });
+    setInput("");
+  };
+
+  const applyOps = useCallback(
+    (operations: any[]) => {
+      fetch(`/api/canvases/${canvasId}/commands`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ operations, origin: "direct_manipulation" }),
+      });
+    },
+    [canvasId],
+  );
+
+  const empty = state.widgets.length === 0;
+
+  return (
+    <div className={`stage ${railOpen ? "" : "wide"}`}>
+      <div className="board">
+        {empty && !busy && (
+          <div className="board-empty">
+            <div className="board-empty-inner">
+              <p className="hint">This canvas is empty. Ask for something.</p>
+              <div className="seeds">
+                {PROMPTS.map((p) => (
+                  <button key={p} onClick={() => send(p)}>
+                    {p}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+        <Canvas
+          widgets={state.widgets}
+          onLayoutChange={applyOps}
+          onRemove={(widgetId) => applyOps([{ kind: "remove_widget", widgetId }])}
+        />
+        {busy && empty && (
+          <div className="board-empty">
+            <div className="composing">composing</div>
+          </div>
+        )}
+      </div>
+
+      <StreamRail messages={messages} busy={busy} open={railOpen} onToggle={() => setRailOpen((v) => !v)} />
+
+      <div className="dock">
+        {error && <div className="dock-error">{error.message}</div>}
+        <form
+          className={`bar ${busy ? "busy" : ""}`}
+          onSubmit={(e) => {
+            e.preventDefault();
+            send(input);
+          }}
+        >
+          <span className="bar-glyph" aria-hidden>
+            ◈
+          </span>
+          <textarea
+            ref={box}
+            rows={1}
+            value={input}
+            placeholder={busy ? "composing…" : "Ask anything. The answer arrives as a canvas."}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                send(input);
+              }
+            }}
+          />
+          <button type="submit" disabled={busy || !input.trim()}>
+            {busy ? <span className="spin" /> : "↵"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+export default function App() {
+  const [canvases, setCanvases] = useState<CanvasListItem[]>([]);
+  const [active, setActive] = useState<string | null>(null);
+  const [title, setTitle] = useState("");
+  const [navOpen, setNavOpen] = useState(false);
+
+  const refreshList = useCallback(async () => {
+    const res = await fetch("/api/canvases");
+    setCanvases(await res.json());
   }, []);
 
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    refreshList();
+  }, [refreshList, active, title]);
 
-  const openConversation = useCallback(async (id: string) => {
-    setActiveId(null);
-    const res = await fetch(`/api/conversations/${id}/messages`);
-    const rows: { id: string; role: string; parts: unknown }[] = await res.json();
-    setInitialMessages(rows as unknown as UIMessage[]);
-    setActiveId(id);
-  }, []);
-
-  const newConversation = useCallback(async () => {
-    const res = await fetch("/api/conversations", {
+  const create = useCallback(async () => {
+    const res = await fetch("/api/canvases", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: "{}",
     });
-    const conv: Conversation = await res.json();
-    setInitialMessages([]);
-    setActiveId(conv.id);
-    refresh();
-  }, [refresh]);
+    const c = await res.json();
+    setTitle(c.title);
+    setActive(c.id);
+    setNavOpen(false);
+    refreshList();
+  }, [refreshList]);
 
+  // Resume the most recent canvas on load; only create when there is nothing to open.
+  const booted = useRef(false);
   useEffect(() => {
-    if (!activeId && conversations.length === 0) return;
-  }, [activeId, conversations]);
+    if (booted.current) return;
+    booted.current = true;
+    fetch("/api/canvases")
+      .then((r) => r.json())
+      .then((list: CanvasListItem[]) => {
+        if (list.length) {
+          setActive(list[0].id);
+          setTitle(list[0].title);
+        } else {
+          create();
+        }
+      });
+  }, [create]);
 
   return (
     <div className="app">
-      <aside className="sidebar">
-        <div className="brand">◈ Vision</div>
-        <button className="new-chat" onClick={newConversation}>
-          + New chat
+      <div className="veil" aria-hidden />
+      <header className="topbar">
+        <button className="mark" onClick={() => setNavOpen((v) => !v)}>
+          <span className="mark-glyph">◈</span> VISION
         </button>
-        <nav>
-          {conversations.map((c) => (
-            <button
-              key={c.id}
-              className={`conv ${c.id === activeId ? "active" : ""}`}
-              onClick={() => openConversation(c.id)}
-            >
-              {c.title}
-            </button>
-          ))}
-        </nav>
-      </aside>
-      <main>
-        {activeId && initialMessages ? (
-          <Chat
-            key={activeId}
-            conversationId={activeId}
-            initialMessages={initialMessages}
-          />
-        ) : (
-          <div className="landing">
-            <h1>◈ Vision</h1>
-            <p>A charts-first agent. Start a new chat.</p>
-            <button className="new-chat big" onClick={newConversation}>
-              + New chat
-            </button>
+        <span className="crumb">{title}</span>
+        <div className="top-actions">
+          <button onClick={() => active && fetch(`/api/canvases/${active}/undo`, { method: "POST" })}>undo</button>
+          <button className="primary" onClick={create}>
+            new canvas
+          </button>
+        </div>
+      </header>
+
+      {navOpen && (
+        <div className="nav-sheet" onClick={() => setNavOpen(false)}>
+          <div className="nav-inner" onClick={(e) => e.stopPropagation()}>
+            <p className="nav-label">canvases</p>
+            {canvases.map((c) => (
+              <button
+                key={c.id}
+                className={c.id === active ? "active" : ""}
+                onClick={() => {
+                  setActive(c.id);
+                  setTitle(c.title);
+                  setNavOpen(false);
+                }}
+              >
+                <span>{c.title}</span>
+                <em>{c.widget_count}</em>
+              </button>
+            ))}
           </div>
-        )}
-      </main>
+        </div>
+      )}
+
+      {active && <CanvasView key={active} canvasId={active} onTitle={setTitle} />}
     </div>
   );
 }
