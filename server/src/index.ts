@@ -15,7 +15,7 @@ import {
   audit,
   pool,
 } from "./db.js";
-import { applyChangeSet, undoLast, type Operation } from "./commands.js";
+import { applyChangeSet, undoLast, compact, type Operation } from "./commands.js";
 import { buildTools } from "./tools.js";
 import { SYSTEM_PROMPT } from "./prompt.js";
 
@@ -69,6 +69,12 @@ app.post("/api/canvases/:id/commands", async (req, res) => {
   const result = await applyChangeSet(req.params.id, ops, req.body?.origin ?? "direct_manipulation");
   notify(req.params.id);
   res.json(result);
+});
+
+app.post("/api/canvases/:id/compact", async (req, res) => {
+  const moved = await compact(req.params.id);
+  notify(req.params.id);
+  res.json({ moved });
 });
 
 app.post("/api/canvases/:id/undo", async (req, res) => {

@@ -181,9 +181,10 @@ export async function getCanvasSummary(canvasId: string) {
     else if (w.kind === "table") detail = `${(spec.rows ?? []).length} rows`;
     else if (w.kind === "narrative") detail = String(spec.body ?? "").slice(0, 80);
     else if (w.kind === "image") detail = String(spec.prompt ?? "").slice(0, 60);
-    return `- ${w.id} | ${w.kind} | "${w.title}" | ${detail}`;
+    const at = w.x === null ? "unplaced" : `x${w.x} y${w.y} ${w.w}x${w.h}`;
+    return `- ${w.id} | ${w.kind} | "${w.title}" | ${at} | ${detail}`;
   });
-  return `Canvas has ${widgets.length} widget(s):\n${lines.join("\n")}`;
+  return `Canvas has ${widgets.length} widget(s), grid is 12 columns wide:\n${lines.join("\n")}`;
 }
 
 export async function getMessages(canvasId: string) {

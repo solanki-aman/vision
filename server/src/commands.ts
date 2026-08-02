@@ -235,6 +235,36 @@ export async function applyChangeSet(
   }
 }
 
+/**
+ * The agent can request overlapping placements. Sweep row-major and push each
+ * widget down to the first free slot at or below its requested row.
+ */
+export async function compact(canvasId: string) {
+  const { rows } = await pool.query(
+    `SELECT widget_id, x, y, w, h FROM canvas.placements
+     WHERE canvas_id = $1 ORDER BY y, x`,
+    [canvasId],
+  );
+  const placed: { x: number; y: number; w: number; h: number }[] = [];
+  const updates: { id: string; y: number }[] = [];
+
+  for (const p of rows) {
+    const w = Math.min(GRID_COLS, Math.max(1, p.w));
+    const x = Math.max(0, Math.min(GRID_COLS - w, p.x));
+    let y = Math.max(0, p.y);
+    const hits = (ty: number) =>
+      placed.some((o) => x < o.x + o.w && x + w > o.x && ty < o.y + o.h && ty + p.h > o.y);
+    while (hits(y)) y += 1;
+    placed.push({ x, y, w, h: p.h });
+    if (y !== p.y || x !== p.x) updates.push({ id: p.widget_id, y });
+  }
+
+  for (const u of updates) {
+    await pool.query(`UPDATE canvas.placements SET y = $2 WHERE widget_id = $1`, [u.id, u.y]);
+  }
+  return updates.length;
+}
+
 /** Undo is a new change set of stored inverse operations — history is never deleted (plan §2.8). */
 export async function undoLast(canvasId: string) {
   const { rows } = await pool.query(
