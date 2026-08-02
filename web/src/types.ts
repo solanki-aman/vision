@@ -71,7 +71,16 @@ export interface Widget {
   h: number;
 }
 
+export interface CanvasStyle {
+  name: string;
+  accent: string;
+  type: "sans" | "serif" | "mono";
+  paper: "default" | "cream" | "cool" | "sage" | "blush";
+  cards: "bordered" | "flat" | "ghost";
+  reason: string;
+}
+
 export interface CanvasState {
-  canvas: { id: string; title: string; current_version: number } | null;
+  canvas: { id: string; title: string; current_version: number; style?: CanvasStyle | null } | null;
   widgets: Widget[];
 }

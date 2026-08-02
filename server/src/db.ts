@@ -88,6 +88,8 @@ export async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_messages_canvas ON conversation.messages (canvas_id, created_at);
   `);
 
+  await pool.query(`ALTER TABLE canvas.canvases ADD COLUMN IF NOT EXISTS style JSONB`);
+
   // Early builds keyed messages on id alone, so assistant ids collided across canvases.
   await pool.query(`
     DO $$
@@ -163,7 +165,7 @@ export async function getCanvasState(canvasId: string) {
     [canvasId],
   );
   const { rows: meta } = await pool.query(
-    `SELECT id, title, current_version FROM canvas.canvases WHERE id = $1`,
+    `SELECT id, title, current_version, style FROM canvas.canvases WHERE id = $1`,
     [canvasId],
   );
   return { canvas: meta[0] ?? null, widgets };
@@ -171,8 +173,11 @@ export async function getCanvasState(canvasId: string) {
 
 /** Compact, token-bounded canvas summary handed to the agent each turn (plan §3.2). */
 export async function getCanvasSummary(canvasId: string) {
-  const { widgets } = await getCanvasState(canvasId);
-  if (widgets.length === 0) return "The canvas is empty.";
+  const { canvas, widgets } = await getCanvasState(canvasId);
+  const styleLine = canvas?.style
+    ? `Canvas identity: "${(canvas.style as any).name}" (accent ${(canvas.style as any).accent}, ${(canvas.style as any).type}, ${(canvas.style as any).paper} paper, ${(canvas.style as any).cards} cards).`
+    : "Canvas identity: NOT SET — call set_style before building.";
+  if (widgets.length === 0) return `The canvas is empty. ${styleLine}`;
   const lines = widgets.slice(0, 24).map((w: any) => {
     const spec = w.spec ?? {};
     let detail = "";
@@ -184,7 +189,15 @@ export async function getCanvasSummary(canvasId: string) {
     const at = w.x === null ? "unplaced" : `x${w.x} y${w.y} ${w.w}x${w.h}`;
     return `- ${w.id} | ${w.kind} | "${w.title}" | ${at} | ${detail}`;
   });
-  return `Canvas has ${widgets.length} widget(s), grid is 12 columns wide:\n${lines.join("\n")}`;
+  return `${styleLine}\nCanvas has ${widgets.length} widget(s), grid is 12 columns wide:\n${lines.join("\n")}`;
+}
+
+export async function setCanvasStyle(canvasId: string, style: unknown) {
+  await pool.query(`UPDATE canvas.canvases SET style = $2, updated_at = now() WHERE id = $1`, [
+    canvasId,
+    JSON.stringify(style),
+  ]);
+  await audit("set_style", "applied", "canvas", canvasId, style);
 }
 
 export async function getMessages(canvasId: string) {

@@ -183,6 +183,26 @@ export const imageSpec = z.object({
   prompt: z.string(),
 });
 
+export const styleSpec = z.object({
+  name: z.string().describe("Name this canvas's visual identity like an art movement, 1-3 words: 'Signal Red', 'Ledger Quiet', 'Midnight Cadence'."),
+  accent: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/)
+    .describe("One accent hex drawn from the subject itself — the brand, the material, the mood. Colours chrome, labels and highlights; never chart series."),
+  type: z
+    .enum(["sans", "serif", "mono"])
+    .describe("Display voice for the hero and titles. serif reads editorial essay; mono reads technical dossier; sans reads product."),
+  paper: z
+    .enum(["default", "cream", "cool", "sage", "blush"])
+    .describe("Background tint of the whole canvas."),
+  cards: z
+    .enum(["bordered", "flat", "ghost"])
+    .describe("bordered = product cards; flat = soft panels without borders; ghost = widgets sit directly on the paper, gallery-style."),
+  reason: z.string().describe("One sentence on why this identity fits the subject."),
+});
+
+export type CanvasStyle = z.infer<typeof styleSpec>;
+
 export const provenance = z.object({
   source: z.string().describe("Where the numbers came from, e.g. 'Live web search' or 'Illustrative'"),
   asOf: z.string().optional(),

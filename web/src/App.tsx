@@ -7,7 +7,7 @@ import { StreamRail } from "./StreamRail";
 import { Settings } from "./Settings";
 import { useTheme } from "./ThemeContext";
 import { FilterProvider } from "./FilterContext";
-import type { CanvasState } from "./types";
+import type { CanvasState, CanvasStyle } from "./types";
 
 interface CanvasListItem {
   id: string;
@@ -94,9 +94,27 @@ function CanvasView({ canvasId, onTitle }: { canvasId: string; onTitle: (t: stri
 
   const empty = state.widgets.length === 0;
 
+  // Per-canvas identity chosen by the agent: accent, display voice, paper, card treatment.
+  const style: CanvasStyle | null = state.canvas?.style ?? null;
+  const DISPLAY: Record<string, string> = {
+    serif: "'New York', 'Iowan Old Style', Georgia, 'Times New Roman', serif",
+    mono: "ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace",
+    sans: "system-ui, -apple-system, 'Segoe UI', sans-serif",
+  };
+  const PAPER: Record<string, string> = {
+    default: "", cream: "#faf6ec", cool: "#f2f5f8", sage: "#f2f6f1", blush: "#f9f3f1",
+  };
+  const styleVars = style
+    ? ({
+        ...(style.accent ? { "--accent": style.accent, "--accent-ink": style.accent, "--accent-wash": `${style.accent}1c` } : {}),
+        "--display": DISPLAY[style.type] ?? DISPLAY.sans,
+        ...(PAPER[style.paper] ? { "--page": PAPER[style.paper], "--page-2": PAPER[style.paper] } : {}),
+      } as React.CSSProperties)
+    : undefined;
+
   return (
     <FilterProvider>
-    <div className={`stage ${railOpen ? "" : "wide"}`}>
+    <div className={`stage ${railOpen ? "" : "wide"}`} data-cards={style?.cards ?? "bordered"} style={styleVars}>
       <div className="board">
         {empty && !busy && (
           <div className="board-empty">

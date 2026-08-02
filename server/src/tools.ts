@@ -1,8 +1,9 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { chartSpec, kpiSpec, tableSpec, narrativeSpec, controlSpec, labelSpec, statementSpec, heroSpec, provenance } from "./specs.js";
+import { chartSpec, kpiSpec, tableSpec, narrativeSpec, controlSpec, labelSpec, statementSpec, heroSpec, styleSpec, provenance } from "./specs.js";
 import { applyChangeSet, applyLayout, applyLanes, type Operation } from "./commands.js";
 import { generateImage } from "./imagine.js";
+import { setCanvasStyle } from "./db.js";
 
 const HEIGHT_ROWS = { label: 1, kpi: 4, short: 6, standard: 8, tall: 11 } as const;
 
@@ -34,6 +35,17 @@ export function buildTools(canvasId: string, onChange: () => void) {
   };
 
   return {
+    set_style: tool({
+      description:
+        "Give this canvas its own visual identity before building — an accent drawn from the subject, a typographic voice, a paper tint, a card treatment. Call it once, first. The default look is the absence of a design decision.",
+      inputSchema: styleSpec,
+      execute: async (style) => {
+        await setCanvasStyle(canvasId, style);
+        onChange();
+        return { ok: true, applied: style.name };
+      },
+    }),
+
     add_chart: tool({
       description:
         "Place a chart on the canvas. Your primary tool — reach for it first.",

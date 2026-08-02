@@ -360,6 +360,7 @@ body {
 .widget header h3 {
   flex: 1;
   font: 600 13px/1.35 system-ui;
+  font-family: var(--display, system-ui);
   color: var(--ink);
   letter-spacing: -0.01em;
   overflow: hidden;
@@ -500,6 +501,7 @@ body {
 }
 .hero-display {
   font: 650 clamp(34px, 4.6vw, 62px)/1.04 system-ui;
+  font-family: var(--display, system-ui);
   letter-spacing: -0.035em;
   color: var(--ink);
   text-wrap: balance;
@@ -829,6 +831,23 @@ body {
   animation: spin 0.7s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* per-canvas card treatments */
+.stage { background: var(--page); }
+.stage[data-cards="flat"] .widget {
+  border-color: transparent;
+  box-shadow: none;
+}
+.stage[data-cards="ghost"] .widget {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+.stage[data-cards="ghost"] .widget:hover { box-shadow: none; }
+.stage[data-cards="ghost"] .prov { border-top: none; padding-left: 0; }
+.stage[data-cards="ghost"] .widget header { padding-left: 0; }
+.stage[data-cards="ghost"] .widget-body { padding-left: 0; }
+.stage[data-cards="ghost"] .table-scroll th { background: var(--page); }
 
 /* ---------- gridstack ---------- */
 .grid-stack > .grid-stack-item > .ui-resizable-handle { opacity: 0; transition: opacity 0.15s; }
