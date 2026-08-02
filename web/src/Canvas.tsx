@@ -28,6 +28,13 @@ export function Canvas({ widgets, onLayoutChange, onRemove }: Props) {
     const g = GridStack.init(
       {
         column: 12,
+        columnOpts: {
+          breakpointForWindow: false,
+          breakpoints: [
+            { w: 700, c: 3 },
+            { w: 1000, c: 6 },
+          ],
+        },
         cellHeight: 76,
         margin: 7,
         float: false,

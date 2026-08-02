@@ -21,6 +21,23 @@ const axis = {
 
 const ITEM_TRIGGER = ["pie", "donut", "scatter", "heatmap", "gauge", "sankey"];
 
+const clip = (n: number) => (s: string) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+
+// Widgets are small and resizable; long series names must never spill out of the card.
+const legendBase = {
+  type: "scroll" as const,
+  bottom: 0,
+  icon: "roundRect",
+  itemWidth: 8,
+  itemHeight: 8,
+  formatter: clip(22),
+  textStyle: { color: INK.secondary, fontSize: 11 },
+  pageTextStyle: { color: INK.muted, fontSize: 10 },
+  pageIconColor: INK.secondary,
+  pageIconInactiveColor: INK.axis,
+  pageIconSize: 9,
+};
+
 /** Typed spec in, renderer options out. The model never supplies ECharts config. */
 export function specToOption(spec: ChartSpec): EChartsOption {
   const cats = spec.xAxis?.categories ?? [];
@@ -44,9 +61,7 @@ export function specToOption(spec: ChartSpec): EChartsOption {
       valueFormatter: (v: unknown) =>
         typeof v === "number" ? `${v.toLocaleString()}${unit}` : String(v ?? ""),
     },
-    legend: multi
-      ? { bottom: 0, icon: "roundRect", itemWidth: 8, itemHeight: 8, textStyle: { color: INK.secondary, fontSize: 11 } }
-      : undefined,
+    legend: multi ? legendBase : undefined,
     grid: { left: 8, right: 16, top: 12, bottom: multi ? 30 : 4, containLabel: true },
   };
 
@@ -141,16 +156,17 @@ export function specToOption(spec: ChartSpec): EChartsOption {
       const s = spec.series[0] ?? { name: "", data: [] };
       return {
         ...base,
-        legend: { bottom: 0, icon: "roundRect", itemWidth: 8, itemHeight: 8, textStyle: { color: INK.secondary, fontSize: 11 } },
+        legend: legendBase,
         series: [
           {
             type: "pie",
             name: s.name,
             radius: spec.chartType === "donut" ? ["48%", "74%"] : "72%",
-            center: ["50%", "45%"],
+            center: ["50%", "44%"],
             itemStyle: { borderColor: "#141413", borderWidth: 2 },
-            label: { color: INK.secondary, fontSize: 11 },
-            labelLine: { lineStyle: { color: INK.axis } },
+            label: { color: INK.secondary, fontSize: 11, formatter: (p: any) => clip(16)(String(p.name)) },
+            labelLine: { lineStyle: { color: INK.axis }, length: 6, length2: 8 },
+            labelLayout: { hideOverlap: true },
             data: cats.map((c, i) => ({ name: c, value: s.data[i] ?? 0 })),
           },
         ],
