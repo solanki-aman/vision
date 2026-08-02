@@ -4,6 +4,7 @@ export const CHART_TYPES = [
   // over time / across categories — needs xAxis.categories + series
   "line", "area", "stacked_area", "step_line", "bar", "horizontal_bar",
   "stacked_bar", "stacked_horizontal_bar", "pictorial_bar", "scatter",
+  "diverging_bar", "bullet", "slope",
   "effect_scatter", "bubble", "waterfall", "theme_river",
   // part of a whole — needs xAxis.categories + one series
   "pie", "donut", "rose", "funnel", "gauge",
@@ -73,6 +74,10 @@ export const chartSpec = z.object({
     .array(z.object({ date: z.string().describe("YYYY-MM-DD"), value: z.number() }))
     .optional()
     .describe("calendar only: one entry per day."),
+  target: z
+    .array(z.number())
+    .optional()
+    .describe("bullet only: the target for each category, aligned to xAxis.categories."),
   zoom: z
     .boolean()
     .optional()

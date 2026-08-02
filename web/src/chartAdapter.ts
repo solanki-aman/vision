@@ -5,6 +5,7 @@ export type ChartType =
   | "line" | "area" | "stacked_area" | "step_line" | "bar" | "horizontal_bar"
   | "stacked_bar" | "stacked_horizontal_bar" | "pictorial_bar" | "scatter"
   | "effect_scatter" | "bubble" | "waterfall" | "theme_river"
+  | "diverging_bar" | "bullet" | "slope"
   | "pie" | "donut" | "rose" | "funnel" | "gauge"
   | "treemap" | "sunburst" | "tree"
   | "sankey" | "graph" | "chord"
@@ -20,6 +21,7 @@ export interface ChartSpec {
   ohlc?: { date: string; open: number; high: number; low: number; close: number }[];
   boxes?: { name: string; min: number; q1: number; median: number; q3: number; max: number }[];
   calendar?: { date: string; value: number }[];
+  target?: number[];
   zoom?: boolean;
 }
 
@@ -45,7 +47,7 @@ const ITEM_TRIGGER = new Set<ChartType>([
 ]);
 
 const NO_LEGEND = new Set<ChartType>([
-  "waterfall", "heatmap", "calendar", "gauge", "treemap", "sunburst", "tree",
+  "waterfall", "diverging_bar", "bullet", "heatmap", "calendar", "gauge", "treemap", "sunburst", "tree",
   "sankey", "graph", "chord", "funnel", "boxplot", "candlestick",
 ]);
 
@@ -239,6 +241,105 @@ export function specToOption(spec: ChartSpec, theme: ChartTheme, animate = true)
           emphasis: { focus: "series" },
         })) as any,
       };
+
+    case "diverging_bar": {
+      // Signed values around a zero baseline — the shape of variance.
+      const values = (series[0]?.data ?? []).map((v) => v ?? 0);
+      const good = SERIES[2];
+      const bad = SERIES[7];
+      return {
+        ...base,
+        grid: { left: 6, right: 24, top: 10, bottom: bottomGap + 4, containLabel: true },
+        xAxis: {
+          ...valAxis,
+          name: spec.yAxis?.label,
+          nameLocation: "middle",
+          nameGap: 26,
+          axisLine: { show: true, lineStyle: { color: INK.axis } },
+        },
+        yAxis: { ...catAxis, data: [...cats].reverse(), axisLine: { show: false } },
+        series: [
+          {
+            type: "bar",
+            data: [...values].reverse().map((v) => ({
+              value: v,
+              itemStyle: { color: v >= 0 ? good : bad, borderRadius: v >= 0 ? [0, 4, 4, 0] : [4, 0, 0, 4] },
+            })),
+            barMaxWidth: 24,
+            label: {
+              show: values.length <= 14,
+              position: "right",
+              color: INK.muted,
+              fontSize: MICRO,
+              formatter: (p: any) => abbrev(p.value),
+            },
+          },
+        ] as any,
+      };
+    }
+
+    case "bullet": {
+      // Actual bar against a target tick — the honest way to show "vs plan".
+      const actual = (series[0]?.data ?? []).map((v) => v ?? 0);
+      const target = spec.target ?? (series[1]?.data ?? []).map((v) => v ?? 0);
+      return {
+        ...base,
+        grid: { left: 6, right: 24, top: 10, bottom: bottomGap + 4, containLabel: true },
+        xAxis: { ...valAxis, name: spec.yAxis?.label },
+        yAxis: { ...catAxis, data: [...cats].reverse() },
+        series: [
+          {
+            type: "bar",
+            name: series[0]?.name ?? "Actual",
+            data: [...actual].reverse().map((v, i) => ({
+              value: v,
+              itemStyle: {
+                color: target.length ? (v >= ([...target].reverse()[i] ?? 0) ? SERIES[2] : SERIES[3]) : SERIES[0],
+                borderRadius: [0, 3, 3, 0],
+              },
+            })),
+            barMaxWidth: 16,
+            z: 2,
+          },
+          {
+            type: "scatter",
+            name: "Target",
+            data: [...target].reverse().map((v, i) => [v, i]),
+            symbol: "rect",
+            symbolSize: [3, 22],
+            itemStyle: { color: INK.primary },
+            z: 3,
+          },
+        ] as any,
+      };
+    }
+
+    case "slope": {
+      // Two points per entity — before and after, ranked by the change.
+      return {
+        ...base,
+        grid: { left: 8, right: 74, top: 14, bottom: bottomGap + 4, containLabel: true },
+        xAxis: { ...catAxis, data: cats.slice(0, 2), boundaryGap: false },
+        yAxis: { ...valAxis, name: spec.yAxis?.label, splitLine: { show: false } },
+        legend: undefined,
+        series: series.map((s, i) => ({
+          type: "line",
+          name: s.name,
+          data: s.data.slice(0, 2),
+          symbolSize: 8,
+          lineStyle: { width: 2 },
+          itemStyle: { color: SERIES[i % SERIES.length] },
+          endLabel: {
+            show: true,
+            color: INK.secondary,
+            fontSize: MICRO,
+            fontFamily: FONT,
+            formatter: (p: any) => `${clip(14)(String(p.seriesName))}  ${abbrev(p.value)}`,
+          },
+          emphasis: { focus: "series" },
+        })) as any,
+      };
+    }
 
     case "pictorial_bar":
       return {
