@@ -241,6 +241,7 @@ export default function App() {
             {canvases.map((c) => (
               <button
                 key={c.id}
+                data-canvas-id={c.id}
                 className={c.id === active ? "active" : ""}
                 onClick={() => {
                   setActive(c.id);

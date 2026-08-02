@@ -221,3 +221,6 @@ __marimo__/
 node_modules/
 web/dist/
 *.tsbuildinfo
+
+# screenshots are regenerated on demand
+screenshots/
