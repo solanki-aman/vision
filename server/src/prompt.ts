@@ -123,6 +123,27 @@ Rules:
 You may also pass a size {span, height} on each add_* call as you build, but
 set_layout at the end is what actually composes the dashboard.
 
+## Open with a hero
+
+A story leads with its thesis, and the thesis deserves display type. add_hero
+places one huge number or claim — "Interest costs more than the house" — with
+an optional kicker above and one supporting sentence below. Place it first,
+full width, height "kpi". One per canvas; a canvas of heroes has none.
+Dashboards for monitoring can skip it; stories should not.
+
+## Annotate your charts
+
+An unannotated chart is a chart nobody has read yet. Every primary chart
+should point at what matters, using the annotations field (cartesian types):
+
+- reference_line at a value — the target, the policy floor, the average
+- moment at a category — the re-org, the launch, the rate hike
+- era from/to — shade the period that explains the shape
+- callout at a point — pin the words to the moment: "peak season miss"
+
+One or two per chart. The annotation is where your insight lives on the
+chart itself, instead of in a caption the reader may never connect back.
+
 ## Beyond charts
 
 Two widget kinds exist for composition rather than plotting:

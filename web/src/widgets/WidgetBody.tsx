@@ -3,7 +3,7 @@ import * as echarts from "echarts";
 import { specToOption, type ChartSpec } from "../chartAdapter";
 import { STATUS } from "../theme";
 import { useTheme } from "../ThemeContext";
-import type { KpiSpec, TableSpec, NarrativeSpec, ImageSpec, ControlSpec, LabelSpec, StatementSpec, Widget } from "../types";
+import type { KpiSpec, TableSpec, NarrativeSpec, ImageSpec, ControlSpec, LabelSpec, StatementSpec, HeroSpec, Widget } from "../types";
 import { useFilters, applyWindow } from "../FilterContext";
 
 function Chart({ spec, widgetId }: { spec: ChartSpec; widgetId: string }) {
@@ -201,6 +201,16 @@ function Statement({ spec }: { spec: StatementSpec }) {
   );
 }
 
+function Hero({ spec }: { spec: HeroSpec }) {
+  return (
+    <div className="hero">
+      {spec.kicker && <span className="hero-kicker">{spec.kicker}</span>}
+      <span className="hero-display">{spec.display}</span>
+      {spec.dek && <span className="hero-dek">{spec.dek}</span>}
+    </div>
+  );
+}
+
 export function WidgetBody({ widget }: { widget: Widget }) {
   switch (widget.kind) {
     case "chart":
@@ -211,6 +221,8 @@ export function WidgetBody({ widget }: { widget: Widget }) {
       return <Label spec={widget.spec as LabelSpec} />;
     case "statement":
       return <Statement spec={widget.spec as StatementSpec} />;
+    case "hero":
+      return <Hero spec={widget.spec as HeroSpec} />;
     case "kpi":
       return <Kpi spec={widget.spec as KpiSpec} />;
     case "table":

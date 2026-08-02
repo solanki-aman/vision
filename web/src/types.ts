@@ -53,11 +53,17 @@ export interface StatementSpec {
   }[];
 }
 
+export interface HeroSpec {
+  display: string;
+  dek?: string;
+  kicker?: string;
+}
+
 export interface Widget {
   id: string;
-  kind: "chart" | "kpi" | "table" | "narrative" | "image" | "control" | "label" | "statement";
+  kind: "chart" | "kpi" | "table" | "narrative" | "image" | "control" | "label" | "statement" | "hero";
   title: string;
-  spec: ChartSpec | KpiSpec | TableSpec | NarrativeSpec | ImageSpec | ControlSpec | LabelSpec | StatementSpec;
+  spec: ChartSpec | KpiSpec | TableSpec | NarrativeSpec | ImageSpec | ControlSpec | LabelSpec | StatementSpec | HeroSpec;
   provenance: Provenance | null;
   x: number;
   y: number;

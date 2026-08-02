@@ -23,6 +23,14 @@ export interface ChartSpec {
   calendar?: { date: string; value: number }[];
   target?: number[];
   zoom?: boolean;
+  annotations?: {
+    kind: "reference_line" | "moment" | "era" | "callout";
+    label: string;
+    value?: number;
+    at?: string;
+    from?: string;
+    to?: string;
+  }[];
 }
 
 const FONT = "system-ui, -apple-system, 'Segoe UI', sans-serif";
@@ -176,6 +184,66 @@ export function specToOption(spec: ChartSpec, theme: ChartTheme, animate = true)
       : undefined,
   };
 
+  // Marks drawn on the plot — the difference between generated and authored.
+  const anno = (() => {
+    const list = spec.annotations ?? [];
+    if (!list.length) return {};
+    const lineData: any[] = [];
+    const areaData: any[] = [];
+    const pointData: any[] = [];
+    for (const n of list) {
+      if (n.kind === "reference_line" && n.value !== undefined) lineData.push({ yAxis: n.value, name: n.label });
+      else if (n.kind === "moment" && n.at) lineData.push({ xAxis: n.at, name: n.label });
+      else if (n.kind === "era" && n.from && n.to)
+        areaData.push([{ xAxis: n.from, name: n.label }, { xAxis: n.to }]);
+      else if (n.kind === "callout" && n.at && n.value !== undefined)
+        pointData.push({ coord: [n.at, n.value], name: n.label });
+    }
+    const out: any = {};
+    if (lineData.length)
+      out.markLine = {
+        silent: true,
+        symbol: "none",
+        animation: false,
+        lineStyle: { color: INK.muted, type: "dashed", width: 1 },
+        label: {
+          color: INK.muted,
+          fontSize: MICRO,
+          fontFamily: FONT,
+          formatter: (p: any) => clip(24)(String(p.name ?? "")),
+          position: "insideEndTop",
+        },
+        data: lineData,
+      };
+    if (areaData.length)
+      out.markArea = {
+        silent: true,
+        animation: false,
+        itemStyle: { color: theme.mode === "dark" ? "rgba(255,255,255,0.05)" : "rgba(20,19,15,0.045)" },
+        label: { color: INK.muted, fontSize: MICRO, fontFamily: FONT, position: "insideTop" },
+        data: areaData,
+      };
+    if (pointData.length)
+      out.markPoint = {
+        silent: true,
+        animation: false,
+        symbol: "circle",
+        symbolSize: 7,
+        itemStyle: { color: INK.primary, borderColor: INK.surface, borderWidth: 2 },
+        label: {
+          color: INK.primary,
+          fontSize: MICRO,
+          fontFamily: FONT,
+          fontWeight: 600,
+          position: "top",
+          distance: 8,
+          formatter: (p: any) => clip(26)(String(p.name ?? "")),
+        },
+        data: pointData,
+      };
+    return out;
+  })();
+
   const cartesian = (x: object, y: object) => ({
     ...base,
     xAxis: { ...x, name: undefined },
@@ -206,6 +274,7 @@ export function specToOption(spec: ChartSpec, theme: ChartTheme, animate = true)
             t === "area" || t === "stacked_area"
               ? { opacity: t === "stacked_area" ? 0.75 : 0.22, color: fill(i) }
               : undefined,
+          ...(i === 0 ? anno : {}),
         })) as any,
       };
 
@@ -221,6 +290,7 @@ export function specToOption(spec: ChartSpec, theme: ChartTheme, animate = true)
           itemStyle: { color: fill(i), borderRadius: t === "stacked_bar" ? 2 : [4, 4, 0, 0] },
           barMaxWidth: 44,
           emphasis: { focus: "series" },
+          ...(i === 0 ? anno : {}),
         })) as any,
       };
 

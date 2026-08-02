@@ -1,6 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { chartSpec, kpiSpec, tableSpec, narrativeSpec, controlSpec, labelSpec, statementSpec, provenance } from "./specs.js";
+import { chartSpec, kpiSpec, tableSpec, narrativeSpec, controlSpec, labelSpec, statementSpec, heroSpec, provenance } from "./specs.js";
 import { applyChangeSet, applyLayout, applyLanes, type Operation } from "./commands.js";
 import { generateImage } from "./imagine.js";
 
@@ -63,6 +63,14 @@ export function buildTools(canvasId: string, onChange: () => void) {
       inputSchema: z.object({ ...titled, spec: narrativeSpec }),
       execute: async ({ title, spec, provenance, size }) =>
         place({ kind: "add_widget", widgetKind: "narrative", title, spec, provenance, size: toSize(size) }),
+    }),
+
+    add_hero: tool({
+      description:
+        "Open the canvas with its thesis in display type — one huge number or claim with a supporting line. A story leads with its hero; place it first, full width, height 'kpi'. One per canvas.",
+      inputSchema: z.object({ title: z.string(), spec: heroSpec, size }),
+      execute: async ({ title, spec, size }) =>
+        place({ kind: "add_widget", widgetKind: "hero", title, spec, size: toSize(size) }),
     }),
 
     add_label: tool({

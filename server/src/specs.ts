@@ -82,6 +82,32 @@ export const chartSpec = z.object({
     .boolean()
     .optional()
     .describe("Adds a draggable range slider under the chart. Use for long time series (20+ points)."),
+  annotations: z
+    .array(
+      z.object({
+        kind: z
+          .enum(["reference_line", "moment", "era", "callout"])
+          .describe(
+            "reference_line: horizontal line at `value` (target, floor, average). moment: vertical line at category `at` (an event). era: shaded band from `from` to `to` (a period). callout: label pinned at category `at` and y `value`.",
+          ),
+        label: z.string().describe("Short annotation text, a few words."),
+        value: z.number().optional(),
+        at: z.string().optional(),
+        from: z.string().optional(),
+        to: z.string().optional(),
+      }),
+    )
+    .max(5)
+    .optional()
+    .describe("Marks drawn ON the chart. Cartesian types only. This is how you point at what matters."),
+});
+
+export const heroSpec = z.object({
+  display: z
+    .string()
+    .describe("The one big thing, set in display type: a number ('$823K') or a short claim, eight words at most."),
+  dek: z.string().optional().describe("One supporting sentence under the display line."),
+  kicker: z.string().optional().describe("Tiny overline above it, e.g. 'FY26 BUDGET REVIEW'."),
 });
 
 export const controlSpec = z.object({
@@ -164,7 +190,7 @@ export const provenance = z.object({
   note: z.string().optional(),
 });
 
-export const WIDGET_KINDS = ["chart", "kpi", "table", "narrative", "image", "control", "label", "statement"] as const;
+export const WIDGET_KINDS = ["chart", "kpi", "table", "narrative", "image", "control", "label", "statement", "hero"] as const;
 export type WidgetKind = (typeof WIDGET_KINDS)[number];
 
 const specByKind = {
@@ -176,6 +202,7 @@ const specByKind = {
   control: controlSpec,
   label: labelSpec,
   statement: statementSpec,
+  hero: heroSpec,
 };
 
 export function validateSpec(kind: WidgetKind, spec: unknown) {

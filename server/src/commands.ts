@@ -30,6 +30,7 @@ const DEFAULT_SIZE: Record<WidgetKind, { w: number; h: number }> = {
   control: { w: 12, h: 2 },
   label: { w: 12, h: 1 },
   statement: { w: 5, h: HEIGHTS.tall },
+  hero: { w: 12, h: HEIGHTS.kpi },
 };
 
 // Forms that need width or breathing room when the agent does not say.
