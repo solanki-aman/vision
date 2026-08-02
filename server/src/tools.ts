@@ -1,17 +1,17 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { chartSpec, kpiSpec, tableSpec, narrativeSpec, controlSpec, provenance } from "./specs.js";
-import { applyChangeSet, applyLayout, type Operation } from "./commands.js";
+import { chartSpec, kpiSpec, tableSpec, narrativeSpec, controlSpec, labelSpec, statementSpec, provenance } from "./specs.js";
+import { applyChangeSet, applyLayout, applyLanes, type Operation } from "./commands.js";
 import { generateImage } from "./imagine.js";
 
-const HEIGHT_ROWS = { kpi: 4, short: 6, standard: 8, tall: 11 } as const;
+const HEIGHT_ROWS = { label: 1, kpi: 4, short: 6, standard: 8, tall: 11 } as const;
 
 const size = z
   .object({
     span: z.number().int().min(2).max(12).describe("Width in columns of a 12-column row."),
     height: z
-      .enum(["kpi", "short", "standard", "tall"])
-      .describe("kpi=120px metric tile, short=200px, standard=320px chart, tall=440px."),
+      .enum(["label", "kpi", "short", "standard", "tall"])
+      .describe("label=40px heading, kpi=175px tile, short=255px, standard=320px, tall=440px."),
   })
   .optional()
   .describe("Omit only when the default size is genuinely right; prefer set_layout at the end.");
@@ -63,6 +63,22 @@ export function buildTools(canvasId: string, onChange: () => void) {
       inputSchema: z.object({ ...titled, spec: narrativeSpec }),
       execute: async ({ title, spec, provenance, size }) =>
         place({ kind: "add_widget", widgetKind: "narrative", title, spec, provenance, size: toSize(size) }),
+    }),
+
+    add_label: tool({
+      description:
+        "Place a section heading — a bare title band with no card chrome. Use these to name the stages of a flow, or to group a canvas into labelled bands. Give it height 'label'.",
+      inputSchema: z.object({ title: z.string(), spec: labelSpec, size }),
+      execute: async ({ title, spec, size }) =>
+        place({ kind: "add_widget", widgetKind: "label", title, spec, size: toSize(size) }),
+    }),
+
+    add_statement: tool({
+      description:
+        "Place a financial statement ledger — ordered lines with +, - and = markers, subtotals and a highlighted total. Use for a P&L build, a cash bridge, or any figure built up from components. This is not a table; it is a calculation.",
+      inputSchema: z.object({ ...titled, spec: statementSpec }),
+      execute: async ({ title, spec, provenance, size }) =>
+        place({ kind: "add_widget", widgetKind: "statement", title, spec, provenance, size: toSize(size) }),
     }),
 
     add_control: tool({
@@ -146,6 +162,36 @@ export function buildTools(canvasId: string, onChange: () => void) {
       }),
       execute: async ({ rows }) => {
         const result = await applyLayout(canvasId, rows);
+        onChange();
+        return result;
+      },
+    }),
+
+    set_lanes: tool({
+      description:
+        "Arrange the canvas as side-by-side vertical columns instead of rows. This is the shape a flow, pipeline or stage diagram needs: one lane per stage, each holding a labelled heading and the cards for that stage. Use instead of set_layout, not as well as it.",
+      inputSchema: z.object({
+        lanes: z
+          .array(
+            z.object({
+              span: z.number().int().min(2).max(12).describe("Relative width; spans across lanes should sum to 12."),
+              items: z
+                .array(
+                  z.object({
+                    widgetId: z.string(),
+                    height: z.enum(["label", "kpi", "short", "standard", "tall"]),
+                  }),
+                )
+                .min(1)
+                .max(8)
+                .describe("Cards stacked top to bottom in this lane."),
+            }),
+          )
+          .min(2)
+          .max(6),
+      }),
+      execute: async ({ lanes }) => {
+        const result = await applyLanes(canvasId, lanes);
         onChange();
         return result;
       },

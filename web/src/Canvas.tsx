@@ -153,12 +153,14 @@ export function Canvas({ widgets, onLayoutChange, onRemove }: Props) {
           }}
         >
           <div className={`grid-stack-item-content widget kind-${w.kind} ${fresh.has(w.id) ? "arriving" : ""}`}>
+            {w.kind !== "label" && (
             <header className="widget-grip">
               <h3 title={w.title}>{w.title}</h3>
               <button className="widget-x" onClick={() => onRemove(w.id)} aria-label={`Remove ${w.title}`}>
                 ✕
               </button>
             </header>
+            )}
             <div className="widget-body">
               <WidgetBody widget={w} />
             </div>

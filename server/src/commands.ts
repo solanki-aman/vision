@@ -18,7 +18,7 @@ export interface ApplyResult {
 const GRID_COLS = 12;
 
 /** Row heights in grid units. One unit is 40px, so a kpi band is 120px. */
-export const HEIGHTS = { kpi: 4, short: 6, standard: 8, tall: 11 } as const;
+export const HEIGHTS = { label: 1, kpi: 4, short: 6, standard: 8, tall: 11 } as const;
 export type HeightName = keyof typeof HEIGHTS;
 
 const DEFAULT_SIZE: Record<WidgetKind, { w: number; h: number }> = {
@@ -28,6 +28,8 @@ const DEFAULT_SIZE: Record<WidgetKind, { w: number; h: number }> = {
   narrative: { w: 4, h: HEIGHTS.standard },
   image: { w: 4, h: HEIGHTS.standard },
   control: { w: 12, h: 2 },
+  label: { w: 12, h: 1 },
+  statement: { w: 5, h: HEIGHTS.tall },
 };
 
 // Forms that need width or breathing room when the agent does not say.
@@ -63,6 +65,73 @@ function sizeFor(kind: WidgetKind, spec: unknown) {
 export interface LayoutRow {
   height: HeightName;
   items: { widgetId: string; span: number }[];
+}
+
+export interface LayoutLane {
+  span: number;
+  items: { widgetId: string; height: HeightName }[];
+}
+
+/** Lanes are vertical stacks side by side — the shape a flow or pipeline needs. */
+export async function applyLanes(canvasId: string, lanes: LayoutLane[]) {
+  const { rows: existing } = await pool.query(
+    `SELECT widget_id FROM canvas.placements WHERE canvas_id = $1`,
+    [canvasId],
+  );
+  const known = new Set(existing.map((r) => r.widget_id));
+  const seen = new Set<string>();
+  const errors: string[] = [];
+
+  const total = lanes.reduce((a, l) => a + Math.max(1, l.span), 0) || 1;
+  let x = 0;
+  let maxY = 0;
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    for (const [idx, lane] of lanes.entries()) {
+      let w = Math.max(2, Math.round((Math.max(1, lane.span) / total) * GRID_COLS));
+      if (idx === lanes.length - 1) w = Math.max(2, GRID_COLS - x);
+      w = Math.min(w, GRID_COLS - x);
+      if (w <= 0) continue;
+
+      let y = 0;
+      for (const item of lane.items) {
+        if (!known.has(item.widgetId)) {
+          errors.push(`unknown widget ${item.widgetId}`);
+          continue;
+        }
+        if (seen.has(item.widgetId)) continue;
+        const h = HEIGHTS[item.height] ?? HEIGHTS.standard;
+        seen.add(item.widgetId);
+        await client.query(
+          `UPDATE canvas.placements SET x = $2, y = $3, w = $4, h = $5 WHERE widget_id = $1`,
+          [item.widgetId, x, y, w, h],
+        );
+        y += h;
+      }
+      maxY = Math.max(maxY, y);
+      x += w;
+    }
+
+    for (const id of known) {
+      if (seen.has(id)) continue;
+      await client.query(`UPDATE canvas.placements SET x = 0, y = $2, w = 12 WHERE widget_id = $1`, [id, maxY]);
+      maxY += HEIGHTS.standard;
+    }
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+
+  await audit("apply_lanes", errors.length ? "partial" : "applied", "canvas", canvasId, {
+    lanes: lanes.length,
+    errors,
+  });
+  return { lanes: lanes.length, placed: seen.size, errors };
 }
 
 /**

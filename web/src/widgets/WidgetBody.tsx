@@ -3,7 +3,7 @@ import * as echarts from "echarts";
 import { specToOption, type ChartSpec } from "../chartAdapter";
 import { STATUS } from "../theme";
 import { useTheme } from "../ThemeContext";
-import type { KpiSpec, TableSpec, NarrativeSpec, ImageSpec, ControlSpec, Widget } from "../types";
+import type { KpiSpec, TableSpec, NarrativeSpec, ImageSpec, ControlSpec, LabelSpec, StatementSpec, Widget } from "../types";
 import { useFilters, applyWindow } from "../FilterContext";
 
 function Chart({ spec, widgetId }: { spec: ChartSpec; widgetId: string }) {
@@ -171,12 +171,46 @@ function RangeControl({ spec }: { spec: ControlSpec }) {
   );
 }
 
+function Label({ spec }: { spec: LabelSpec }) {
+  return (
+    <div className="labelband">
+      <span className="labelband-text">{spec.text}</span>
+      {spec.note && <span className="labelband-note">{spec.note}</span>}
+    </div>
+  );
+}
+
+function Statement({ spec }: { spec: StatementSpec }) {
+  const sign = { add: "+", subtract: "−", subtotal: "=", total: "=" } as const;
+  return (
+    <div className="statement">
+      {spec.unit && <div className="statement-unit">{spec.unit}</div>}
+      {spec.lines.map((l, i) => (
+        <div key={i} className={`stmt-line role-${l.role} ${l.indent ? "indent" : ""}`}>
+          <span className="stmt-sign" aria-hidden>
+            {sign[l.role]}
+          </span>
+          <span className="stmt-label">{l.label}</span>
+          {l.percent !== undefined && <span className="stmt-pct">{l.percent.toFixed(1)}%</span>}
+          <span className="stmt-value">
+            {l.role === "subtract" ? `(${fmt(Math.abs(l.value))})` : fmt(l.value)}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function WidgetBody({ widget }: { widget: Widget }) {
   switch (widget.kind) {
     case "chart":
       return <Chart spec={widget.spec as ChartSpec} widgetId={widget.id} />;
     case "control":
       return <RangeControl spec={widget.spec as ControlSpec} />;
+    case "label":
+      return <Label spec={widget.spec as LabelSpec} />;
+    case "statement":
+      return <Statement spec={widget.spec as StatementSpec} />;
     case "kpi":
       return <Kpi spec={widget.spec as KpiSpec} />;
     case "table":

@@ -37,11 +37,27 @@ export interface ControlSpec {
   targets: string[];
 }
 
+export interface LabelSpec {
+  text: string;
+  note?: string;
+}
+
+export interface StatementSpec {
+  unit?: string;
+  lines: {
+    label: string;
+    value: number;
+    role: "add" | "subtract" | "subtotal" | "total";
+    percent?: number;
+    indent?: boolean;
+  }[];
+}
+
 export interface Widget {
   id: string;
-  kind: "chart" | "kpi" | "table" | "narrative" | "image" | "control";
+  kind: "chart" | "kpi" | "table" | "narrative" | "image" | "control" | "label" | "statement";
   title: string;
-  spec: ChartSpec | KpiSpec | TableSpec | NarrativeSpec | ImageSpec | ControlSpec;
+  spec: ChartSpec | KpiSpec | TableSpec | NarrativeSpec | ImageSpec | ControlSpec | LabelSpec | StatementSpec;
   provenance: Provenance | null;
   x: number;
   y: number;

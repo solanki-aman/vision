@@ -124,6 +124,29 @@ export const narrativeSpec = z.object({
   tone: z.enum(["neutral", "positive", "caution", "critical"]).default("neutral"),
 });
 
+export const labelSpec = z.object({
+  text: z.string().describe("Short section heading, e.g. 'LAYER 1 — SOURCE ACCOUNTS'."),
+  note: z.string().optional().describe("One short line under the heading."),
+});
+
+export const statementSpec = z.object({
+  unit: z.string().optional().describe("e.g. 'USD M'."),
+  lines: z
+    .array(
+      z.object({
+        label: z.string(),
+        value: z.number(),
+        role: z
+          .enum(["add", "subtract", "subtotal", "total"])
+          .describe("add renders +, subtract renders -, subtotal and total render = with a rule above."),
+        percent: z.number().optional().describe("Share of the reference line, 0-100."),
+        indent: z.boolean().optional(),
+      }),
+    )
+    .min(2)
+    .max(24),
+});
+
 export const imageSpec = z.object({
   url: z.string(),
   prompt: z.string(),
@@ -136,7 +159,7 @@ export const provenance = z.object({
   note: z.string().optional(),
 });
 
-export const WIDGET_KINDS = ["chart", "kpi", "table", "narrative", "image", "control"] as const;
+export const WIDGET_KINDS = ["chart", "kpi", "table", "narrative", "image", "control", "label", "statement"] as const;
 export type WidgetKind = (typeof WIDGET_KINDS)[number];
 
 const specByKind = {
@@ -146,6 +169,8 @@ const specByKind = {
   narrative: narrativeSpec,
   image: imageSpec,
   control: controlSpec,
+  label: labelSpec,
+  statement: statementSpec,
 };
 
 export function validateSpec(kind: WidgetKind, spec: unknown) {
