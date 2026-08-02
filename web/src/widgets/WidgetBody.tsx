@@ -68,10 +68,12 @@ function Kpi({ spec }: { spec: KpiSpec }) {
   return (
     <div className="kpi">
       <div className="kpi-value">
-        {fmt(spec.value)}
+        <span>{fmt(spec.value)}</span>
         {spec.unit && <span className="kpi-unit">{spec.unit}</span>}
       </div>
-      <div className="kpi-label">{spec.label}</div>
+      <div className="kpi-label" title={spec.label}>
+        {spec.label}
+      </div>
       {c && (
         <div className="kpi-delta" style={{ color: good === null ? undefined : good ? STATUS.good : STATUS.critical }}>
           <span aria-hidden>{delta >= 0 ? "▲" : "▼"}</span>

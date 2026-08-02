@@ -1,130 +1,221 @@
-import type { EChartsOption, SeriesOption } from "echarts";
+import type { EChartsOption } from "echarts";
 import { SERIES, SEQUENTIAL, INK } from "./theme";
 
+export type ChartType =
+  | "line" | "area" | "stacked_area" | "step_line" | "bar" | "horizontal_bar"
+  | "stacked_bar" | "stacked_horizontal_bar" | "pictorial_bar" | "scatter"
+  | "effect_scatter" | "bubble" | "waterfall" | "theme_river"
+  | "pie" | "donut" | "rose" | "funnel" | "gauge"
+  | "treemap" | "sunburst" | "tree"
+  | "sankey" | "graph" | "chord"
+  | "boxplot" | "candlestick" | "heatmap" | "calendar" | "radar" | "parallel";
+
 export interface ChartSpec {
-  chartType:
-    | "line" | "area" | "bar" | "horizontal_bar" | "stacked_bar" | "pie" | "donut"
-    | "scatter" | "radar" | "heatmap" | "waterfall" | "gauge" | "sankey";
+  chartType: ChartType;
   xAxis?: { label?: string; categories: string[] };
   yAxis?: { label?: string; unit?: string };
   series: { name: string; data: (number | null)[] }[];
   links?: { from: string; to: string; value: number }[];
+  hierarchy?: { name: string; parent?: string; value?: number }[];
+  ohlc?: { date: string; open: number; high: number; low: number; close: number }[];
+  boxes?: { name: string; min: number; q1: number; median: number; q3: number; max: number }[];
+  calendar?: { date: string; value: number }[];
 }
 
-const axis = {
-  axisLine: { lineStyle: { color: INK.axis } },
-  axisTick: { show: false },
-  axisLabel: { color: INK.muted, fontSize: 11 },
-  splitLine: { lineStyle: { color: INK.grid, width: 1 } },
-  nameTextStyle: { color: INK.secondary, fontSize: 11 },
-};
-
-const ITEM_TRIGGER = ["pie", "donut", "scatter", "heatmap", "gauge", "sankey"];
+const FONT = "system-ui, -apple-system, 'Segoe UI', sans-serif";
+const LABEL = 11;
+const MICRO = 10;
 
 const clip = (n: number) => (s: string) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
-// Widgets are small and resizable; long series names must never spill out of the card.
+function abbrev(n: number): string {
+  const a = Math.abs(n);
+  if (a >= 1e12) return `${+(n / 1e12).toFixed(1)}T`;
+  if (a >= 1e9) return `${+(n / 1e9).toFixed(1)}B`;
+  if (a >= 1e6) return `${+(n / 1e6).toFixed(1)}M`;
+  if (a >= 1e3) return `${+(n / 1e3).toFixed(1)}K`;
+  return `${+n.toFixed(2)}`;
+}
+
+const catAxis = {
+  type: "category" as const,
+  axisTick: { show: false },
+  axisLine: { lineStyle: { color: INK.axis } },
+  axisLabel: { color: INK.muted, fontSize: LABEL, fontFamily: FONT, hideOverlap: true },
+  splitLine: { show: false },
+  nameTextStyle: { color: INK.muted, fontSize: MICRO },
+};
+
+const valAxis = {
+  type: "value" as const,
+  axisTick: { show: false },
+  axisLine: { show: false },
+  axisLabel: {
+    color: INK.muted,
+    fontSize: LABEL,
+    fontFamily: FONT,
+    formatter: (v: number) => abbrev(v),
+  },
+  splitLine: { lineStyle: { color: INK.grid, width: 1 } },
+  nameTextStyle: { color: INK.muted, fontSize: MICRO },
+};
+
 const legendBase = {
   type: "scroll" as const,
   bottom: 0,
   icon: "roundRect",
   itemWidth: 8,
   itemHeight: 8,
+  itemGap: 14,
   formatter: clip(22),
-  textStyle: { color: INK.secondary, fontSize: 11 },
-  pageTextStyle: { color: INK.muted, fontSize: 10 },
+  textStyle: { color: INK.secondary, fontSize: LABEL, fontFamily: FONT },
+  pageTextStyle: { color: INK.muted, fontSize: MICRO },
   pageIconColor: INK.secondary,
   pageIconInactiveColor: INK.axis,
   pageIconSize: 9,
 };
 
+const ITEM_TRIGGER = new Set<ChartType>([
+  "pie", "donut", "rose", "funnel", "gauge", "scatter", "effect_scatter", "bubble",
+  "heatmap", "calendar", "sankey", "graph", "chord", "treemap", "sunburst", "tree",
+  "parallel", "theme_river",
+]);
+
+const NO_LEGEND = new Set<ChartType>([
+  "waterfall", "heatmap", "calendar", "gauge", "treemap", "sunburst", "tree",
+  "sankey", "graph", "chord", "funnel", "boxplot", "candlestick",
+]);
+
+/** Flat parent-child list → nested tree. Flat is far easier for a model to emit correctly. */
+function toTree(items: NonNullable<ChartSpec["hierarchy"]>) {
+  type Node = { name: string; value?: number; children: Node[] };
+  const nodes = new Map<string, Node>();
+  for (const i of items) nodes.set(i.name, { name: i.name, value: i.value, children: [] });
+  const roots: Node[] = [];
+  for (const i of items) {
+    const node = nodes.get(i.name)!;
+    const parent = i.parent ? nodes.get(i.parent) : undefined;
+    if (parent && parent !== node) parent.children.push(node);
+    else roots.push(node);
+  }
+  const prune = (n: Node): any =>
+    n.children.length ? { name: n.name, children: n.children.map(prune) } : { name: n.name, value: n.value ?? 0 };
+  return roots.map(prune);
+}
+
 /** Typed spec in, renderer options out. The model never supplies ECharts config. */
 export function specToOption(spec: ChartSpec): EChartsOption {
+  const t = spec.chartType;
   const cats = spec.xAxis?.categories ?? [];
+  const series = spec.series ?? [];
   const unit = spec.yAxis?.unit ? ` ${spec.yAxis.unit}` : "";
-  const multi = spec.series.length > 1;
+  const showLegend = series.length > 1 && !NO_LEGEND.has(t);
+  const bottomGap = showLegend ? 34 : 6;
 
   const base: EChartsOption = {
     color: SERIES,
     backgroundColor: "transparent",
-    animationDuration: 600,
+    animationDuration: 550,
     animationEasing: "cubicOut",
-    textStyle: { color: INK.secondary, fontFamily: "system-ui, sans-serif" },
+    textStyle: { color: INK.secondary, fontFamily: FONT, fontSize: LABEL },
     tooltip: {
-      trigger: ITEM_TRIGGER.includes(spec.chartType) ? "item" : "axis",
-      backgroundColor: "rgba(20,20,19,0.95)",
+      trigger: ITEM_TRIGGER.has(t) ? "item" : "axis",
+      backgroundColor: "rgba(18,18,17,0.96)",
       borderColor: INK.border,
       borderWidth: 1,
-      padding: [8, 12],
-      textStyle: { color: INK.primary, fontSize: 12 },
-      axisPointer: { type: "line", lineStyle: { color: INK.axis } },
+      padding: [9, 12],
+      textStyle: { color: INK.primary, fontSize: 12, fontFamily: FONT },
+      axisPointer: { type: "line", lineStyle: { color: INK.axis, width: 1 } },
       valueFormatter: (v: unknown) =>
         typeof v === "number" ? `${v.toLocaleString()}${unit}` : String(v ?? ""),
     },
-    legend: multi ? legendBase : undefined,
-    grid: { left: 8, right: 16, top: 12, bottom: multi ? 30 : 4, containLabel: true },
+    legend: showLegend ? legendBase : undefined,
+    grid: { left: 6, right: 14, top: 10, bottom: bottomGap, containLabel: true },
   };
 
-  switch (spec.chartType) {
+  const cartesian = (x: object, y: object) => ({
+    ...base,
+    xAxis: { ...x, name: undefined },
+    yAxis: y,
+  });
+
+  switch (t) {
     case "line":
     case "area":
+    case "stacked_area":
+    case "step_line":
       return {
-        ...base,
-        xAxis: { type: "category", data: cats, boundaryGap: false, ...axis },
-        yAxis: { type: "value", name: spec.yAxis?.label, ...axis },
-        series: spec.series.map((s, i) => ({
+        ...cartesian(
+          { ...catAxis, data: cats, boundaryGap: false },
+          { ...valAxis, name: spec.yAxis?.label },
+        ),
+        series: series.map((s, i) => ({
           type: "line",
           name: s.name,
           data: s.data,
-          symbolSize: 7,
-          showSymbol: s.data.length <= 24,
+          step: t === "step_line" ? "middle" : undefined,
+          stack: t === "stacked_area" ? "total" : undefined,
+          symbolSize: 6,
+          showSymbol: s.data.length <= 20,
           lineStyle: { width: 2 },
+          emphasis: { focus: "series" },
           areaStyle:
-            spec.chartType === "area"
-              ? { opacity: 0.16, color: SERIES[i % SERIES.length] }
+            t === "area" || t === "stacked_area"
+              ? { opacity: t === "stacked_area" ? 0.5 : 0.15, color: SERIES[i % SERIES.length] }
               : undefined,
-        })) as SeriesOption[],
+        })) as any,
       };
 
     case "bar":
     case "stacked_bar":
       return {
-        ...base,
-        xAxis: { type: "category", data: cats, ...axis },
-        yAxis: { type: "value", name: spec.yAxis?.label, ...axis },
-        series: spec.series.map((s) => ({
+        ...cartesian({ ...catAxis, data: cats }, { ...valAxis, name: spec.yAxis?.label }),
+        series: series.map((s) => ({
           type: "bar",
           name: s.name,
           data: s.data,
-          stack: spec.chartType === "stacked_bar" ? "total" : undefined,
-          itemStyle: { borderRadius: [4, 4, 0, 0] },
-          barMaxWidth: 48,
-        })) as SeriesOption[],
+          stack: t === "stacked_bar" ? "total" : undefined,
+          itemStyle: { borderRadius: t === "stacked_bar" ? 2 : [4, 4, 0, 0] },
+          barMaxWidth: 44,
+          emphasis: { focus: "series" },
+        })) as any,
       };
 
     case "horizontal_bar":
+    case "stacked_horizontal_bar":
       return {
         ...base,
-        grid: { left: 8, right: 20, top: 8, bottom: multi ? 34 : 10, containLabel: true },
-        xAxis: {
-          type: "value",
-          name: spec.yAxis?.label,
-          nameLocation: "middle",
-          nameGap: 26,
-          ...axis,
-        },
-        yAxis: { type: "category", data: [...cats].reverse(), ...axis },
-        series: spec.series.map((s) => ({
+        grid: { left: 6, right: 18, top: 10, bottom: bottomGap + 12, containLabel: true },
+        xAxis: { ...valAxis, name: spec.yAxis?.label, nameLocation: "middle", nameGap: 28 },
+        yAxis: { ...catAxis, data: [...cats].reverse() },
+        series: series.map((s) => ({
           type: "bar",
           name: s.name,
           data: [...s.data].reverse(),
-          itemStyle: { borderRadius: [0, 4, 4, 0] },
-          barMaxWidth: 28,
-        })) as SeriesOption[],
+          stack: t === "stacked_horizontal_bar" ? "total" : undefined,
+          itemStyle: { borderRadius: t === "stacked_horizontal_bar" ? 2 : [0, 4, 4, 0] },
+          barMaxWidth: 26,
+          emphasis: { focus: "series" },
+        })) as any,
+      };
+
+    case "pictorial_bar":
+      return {
+        ...cartesian({ ...catAxis, data: cats }, { ...valAxis, name: spec.yAxis?.label }),
+        series: series.map((s) => ({
+          type: "pictorialBar",
+          name: s.name,
+          data: s.data,
+          symbol: "roundRect",
+          symbolRepeat: true,
+          symbolSize: ["70%", 5],
+          symbolMargin: 3,
+          symbolClip: false,
+        })) as any,
       };
 
     case "waterfall": {
-      const values = (spec.series[0]?.data ?? []).map((v) => v ?? 0);
+      const values = (series[0]?.data ?? []).map((v) => v ?? 0);
       const support: number[] = [];
       let run = 0;
       for (const v of values) {
@@ -132,161 +223,468 @@ export function specToOption(spec: ChartSpec): EChartsOption {
         run += v;
       }
       return {
-        ...base,
-        legend: undefined,
-        xAxis: { type: "category", data: cats, ...axis },
-        yAxis: { type: "value", name: spec.yAxis?.label, ...axis },
+        ...cartesian({ ...catAxis, data: cats }, { ...valAxis, name: spec.yAxis?.label }),
         series: [
           { type: "bar", stack: "wf", itemStyle: { color: "transparent" }, data: support, silent: true },
           {
             type: "bar",
             stack: "wf",
+            barMaxWidth: 44,
             data: values.map((v) => ({
               value: Math.abs(v),
               itemStyle: { color: v >= 0 ? SERIES[2] : SERIES[7], borderRadius: 3 },
             })),
-            barMaxWidth: 48,
+            label: {
+              show: values.length <= 10,
+              position: "top",
+              color: INK.secondary,
+              fontSize: MICRO,
+              formatter: (p: any) => abbrev(values[p.dataIndex]),
+            },
           },
-        ] as SeriesOption[],
-      };
-    }
-
-    case "pie":
-    case "donut": {
-      const s = spec.series[0] ?? { name: "", data: [] };
-      return {
-        ...base,
-        legend: legendBase,
-        series: [
-          {
-            type: "pie",
-            name: s.name,
-            radius: spec.chartType === "donut" ? ["48%", "74%"] : "72%",
-            center: ["50%", "44%"],
-            itemStyle: { borderColor: "#141413", borderWidth: 2 },
-            label: { color: INK.secondary, fontSize: 11, formatter: (p: any) => clip(16)(String(p.name)) },
-            labelLine: { lineStyle: { color: INK.axis }, length: 6, length2: 8 },
-            labelLayout: { hideOverlap: true },
-            data: cats.map((c, i) => ({ name: c, value: s.data[i] ?? 0 })),
-          },
-        ],
+        ] as any,
       };
     }
 
     case "scatter":
+    case "effect_scatter":
+    case "bubble": {
+      const sizes = t === "bubble" ? (series[1]?.data ?? []) : [];
+      const maxSize = Math.max(1, ...sizes.map((v) => Math.abs(v ?? 0)));
+      return {
+        ...cartesian(
+          { ...catAxis, data: cats, name: spec.xAxis?.label },
+          { ...valAxis, name: spec.yAxis?.label },
+        ),
+        series: (t === "bubble" ? series.slice(0, 1) : series.slice(0, 4)).map((s) => ({
+          type: t === "effect_scatter" ? "effectScatter" : "scatter",
+          name: s.name,
+          data: s.data.map((v, i) => [i, v]),
+          rippleEffect: t === "effect_scatter" ? { scale: 2.4 } : undefined,
+          symbolSize:
+            t === "bubble"
+              ? (d: number[]) => 8 + (Math.abs(sizes[d[0]] ?? 0) / maxSize) * 34
+              : 10,
+          itemStyle: { opacity: 0.85 },
+        })) as any,
+      };
+    }
+
+    case "theme_river": {
+      // themeRiver needs a numeric/time axis to lay out its bands, so index the categories.
+      const data: [number, number, string][] = [];
+      series.forEach((s) => s.data.forEach((v, i) => data.push([i, v ?? 0, s.name])));
       return {
         ...base,
-        xAxis: { type: "category", data: cats, name: spec.xAxis?.label, ...axis },
-        yAxis: { type: "value", name: spec.yAxis?.label, ...axis },
-        series: spec.series.slice(0, 3).map((s) => ({
-          type: "scatter",
-          name: s.name,
-          data: s.data,
-          symbolSize: 11,
-          itemStyle: { opacity: 0.85 },
-        })) as SeriesOption[],
+        singleAxis: {
+          type: "value",
+          min: 0,
+          max: Math.max(1, cats.length - 1),
+          interval: 1,
+          left: 10,
+          right: 16,
+          top: 12,
+          bottom: bottomGap + 18,
+          axisTick: { show: false },
+          axisLine: { lineStyle: { color: INK.axis } },
+          splitLine: { show: false },
+          axisLabel: {
+            color: INK.muted,
+            fontSize: LABEL,
+            fontFamily: FONT,
+            formatter: (v: number) => cats[v] ?? "",
+          },
+        },
+        series: [
+          {
+            type: "themeRiver",
+            data,
+            label: { show: false },
+            emphasis: { focus: "series" },
+            itemStyle: { shadowBlur: 0 },
+          },
+        ] as any,
       };
+    }
+
+    case "pie":
+    case "donut":
+    case "rose": {
+      const s = series[0] ?? { name: "", data: [] };
+      const total = s.data.reduce<number>((a, b) => a + (b ?? 0), 0) || 1;
+      return {
+        ...base,
+        legend: { ...legendBase, show: cats.length <= 8 },
+        series: [
+          {
+            type: "pie",
+            name: s.name,
+            roseType: t === "rose" ? "area" : undefined,
+            radius: t === "donut" ? ["46%", "72%"] : t === "rose" ? ["18%", "74%"] : "70%",
+            center: ["50%", "44%"],
+            itemStyle: { borderColor: "#141413", borderWidth: 2, borderRadius: 3 },
+            label: {
+              color: INK.secondary,
+              fontSize: MICRO,
+              formatter: (p: any) => `${clip(14)(String(p.name))}  ${((p.value / total) * 100).toFixed(0)}%`,
+            },
+            labelLine: { lineStyle: { color: INK.axis }, length: 6, length2: 8 },
+            labelLayout: { hideOverlap: true },
+            emphasis: { scaleSize: 6 },
+            data: cats.map((c, i) => ({ name: c, value: s.data[i] ?? 0 })),
+          },
+        ] as any,
+      };
+    }
+
+    case "funnel": {
+      const s = series[0] ?? { name: "", data: [] };
+      return {
+        ...base,
+        series: [
+          {
+            type: "funnel",
+            name: s.name,
+            left: "8%",
+            right: "8%",
+            top: 8,
+            bottom: 8,
+            gap: 2,
+            minSize: "18%",
+            label: { color: INK.primary, fontSize: LABEL, formatter: (p: any) => clip(20)(String(p.name)) },
+            itemStyle: { borderColor: "#141413", borderWidth: 2 },
+            data: cats.map((c, i) => ({ name: c, value: s.data[i] ?? 0 })),
+          },
+        ] as any,
+      };
+    }
+
+    case "gauge": {
+      const v = series[0]?.data[0] ?? 0;
+      return {
+        ...base,
+        series: [
+          {
+            type: "gauge",
+            startAngle: 205,
+            endAngle: -25,
+            min: 0,
+            max: 100,
+            radius: "76%",
+            center: ["50%", "60%"],
+            progress: { show: true, width: 11, roundCap: true, itemStyle: { color: SERIES[0] } },
+            axisLine: { roundCap: true, lineStyle: { width: 11, color: [[1, INK.grid]] } },
+            axisTick: { show: false },
+            splitLine: { show: false },
+            axisLabel: { show: false },
+            pointer: { show: false },
+            title: { show: false },
+            detail: {
+              valueAnimation: true,
+              color: INK.primary,
+              fontSize: 26,
+              fontWeight: 600,
+              fontFamily: FONT,
+              offsetCenter: [0, "26%"],
+              formatter: `{value}${spec.yAxis?.unit ?? ""}`,
+            },
+            data: [{ value: +(v ?? 0).toFixed(1) }],
+          },
+        ] as any,
+      };
+    }
+
+    case "treemap":
+      return {
+        ...base,
+        series: [
+          {
+            type: "treemap",
+            data: toTree(spec.hierarchy ?? []),
+            roam: false,
+            nodeClick: false,
+            breadcrumb: { show: false },
+            label: { color: "#fff", fontSize: LABEL, fontFamily: FONT, formatter: (p: any) => clip(18)(String(p.name)) },
+            upperLabel: { show: true, height: 20, color: INK.secondary, fontSize: MICRO },
+            itemStyle: { borderColor: "#141413", borderWidth: 2, gapWidth: 2, borderRadius: 3 },
+            levels: [{}, { itemStyle: { borderWidth: 2, gapWidth: 2 } }],
+          },
+        ] as any,
+      };
+
+    case "sunburst":
+      return {
+        ...base,
+        series: [
+          {
+            type: "sunburst",
+            data: toTree(spec.hierarchy ?? []),
+            radius: ["16%", "92%"],
+            center: ["50%", "50%"],
+            nodeClick: false,
+            itemStyle: { borderColor: "#141413", borderWidth: 2 },
+            label: { color: "#fff", fontSize: MICRO, minAngle: 14, formatter: (p: any) => clip(12)(String(p.name)) },
+          },
+        ] as any,
+      };
+
+    case "tree":
+      return {
+        ...base,
+        series: [
+          {
+            type: "tree",
+            data: toTree(spec.hierarchy ?? []),
+            left: 62,
+            right: 78,
+            top: 14,
+            bottom: 14,
+            symbolSize: 8,
+            orient: "LR",
+            expandAndCollapse: false,
+            itemStyle: { color: SERIES[0], borderWidth: 0 },
+            lineStyle: { color: INK.axis, width: 1, curveness: 0.4 },
+            label: { color: INK.secondary, fontSize: MICRO, position: "left", align: "right", distance: 6 },
+            leaves: { label: { position: "right", align: "left" } },
+          },
+        ] as any,
+      };
+
+    case "sankey":
+    case "chord":
+    case "graph": {
+      const links = spec.links ?? [];
+      const names = [...new Set(links.flatMap((l) => [l.from, l.to]))];
+      if (t === "sankey") {
+        return {
+          ...base,
+          series: [
+            {
+              type: "sankey",
+              data: names.map((n) => ({ name: n })),
+              links: links.map((l) => ({ source: l.from, target: l.to, value: l.value })),
+              left: 6,
+              right: 78,
+              top: 10,
+              bottom: 10,
+              emphasis: { focus: "adjacency" },
+              lineStyle: { color: "gradient", opacity: 0.32 },
+              label: { color: INK.secondary, fontSize: MICRO, formatter: (p: any) => clip(16)(String(p.name)) },
+              itemStyle: { borderWidth: 0 },
+            },
+          ] as any,
+        };
+      }
+      const weight = new Map<string, number>();
+      for (const l of links) {
+        weight.set(l.from, (weight.get(l.from) ?? 0) + l.value);
+        weight.set(l.to, (weight.get(l.to) ?? 0) + l.value);
+      }
+      const maxW = Math.max(1, ...weight.values());
+      return {
+        ...base,
+        series: [
+          {
+            type: "graph",
+            layout: "circular",
+            circular: { rotateLabel: false },
+            left: 54,
+            right: 54,
+            top: 20,
+            bottom: 20,
+            data: names.map((n, i) => ({
+              name: n,
+              value: weight.get(n) ?? 0,
+              symbolSize: 9 + ((weight.get(n) ?? 0) / maxW) * 22,
+              itemStyle: { color: SERIES[i % SERIES.length] },
+            })),
+            links: links.map((l) => ({ source: l.from, target: l.to, value: l.value })),
+            roam: false,
+            label: {
+              show: true,
+              position: "right",
+              color: INK.secondary,
+              fontSize: MICRO,
+              fontFamily: FONT,
+              formatter: (p: any) => clip(12)(String(p.name)),
+            },
+            lineStyle: { color: "source", opacity: 0.28, curveness: 0.3 },
+            emphasis: { focus: "adjacency", lineStyle: { opacity: 0.7, width: 2 } },
+          },
+        ] as any,
+      };
+    }
+
+    case "boxplot": {
+      const boxes = spec.boxes ?? [];
+      return {
+        ...cartesian(
+          { ...catAxis, data: boxes.map((b) => b.name) },
+          { ...valAxis, name: spec.yAxis?.label },
+        ),
+        series: [
+          {
+            type: "boxplot",
+            data: boxes.map((b) => [b.min, b.q1, b.median, b.q3, b.max]),
+            itemStyle: { color: "rgba(57,135,229,0.22)", borderColor: SERIES[0], borderWidth: 1.5 },
+            boxWidth: [10, 42],
+          },
+        ] as any,
+      };
+    }
+
+    case "candlestick": {
+      const rows = spec.ohlc ?? [];
+      return {
+        ...cartesian(
+          { ...catAxis, data: rows.map((r) => r.date) },
+          { ...valAxis, name: spec.yAxis?.label, scale: true },
+        ),
+        series: [
+          {
+            type: "candlestick",
+            data: rows.map((r) => [r.open, r.close, r.low, r.high]),
+            itemStyle: {
+              color: SERIES[2],
+              color0: SERIES[7],
+              borderColor: SERIES[2],
+              borderColor0: SERIES[7],
+              borderWidth: 1,
+            },
+          },
+        ] as any,
+      };
+    }
+
+    case "calendar": {
+      const days = spec.calendar ?? [];
+      const vals = days.map((d) => d.value);
+      const year = days[0]?.date?.slice(0, 4) ?? String(new Date().getFullYear());
+      return {
+        ...base,
+        grid: undefined,
+        visualMap: {
+          min: Math.min(0, ...vals),
+          max: Math.max(1, ...vals),
+          orient: "horizontal",
+          left: "center",
+          bottom: 2,
+          itemWidth: 9,
+          itemHeight: 50,
+          inRange: { color: SEQUENTIAL },
+          textStyle: { color: INK.muted, fontSize: MICRO },
+        },
+        calendar: {
+          top: 24,
+          left: 34,
+          right: 12,
+          cellSize: ["auto", 13],
+          range: year,
+          itemStyle: { color: "transparent", borderColor: "#141413", borderWidth: 2 },
+          splitLine: { show: false },
+          yearLabel: { show: false },
+          dayLabel: { color: INK.muted, fontSize: MICRO, nameMap: "en" },
+          monthLabel: { color: INK.muted, fontSize: MICRO, nameMap: "en" },
+        },
+        series: [
+          {
+            type: "heatmap",
+            coordinateSystem: "calendar",
+            data: days.map((d) => [d.date, d.value]),
+          },
+        ] as any,
+      };
+    }
 
     case "radar":
       return {
         ...base,
         radar: {
-          indicator: cats.map((c) => ({ name: c })),
-          axisName: { color: INK.secondary, fontSize: 11 },
+          indicator: cats.map((c) => ({ name: clip(14)(c) })),
+          center: ["50%", "48%"],
+          radius: "66%",
+          axisName: { color: INK.muted, fontSize: MICRO },
           splitLine: { lineStyle: { color: INK.grid } },
-          axisLine: { lineStyle: { color: INK.axis } },
+          axisLine: { lineStyle: { color: INK.grid } },
           splitArea: { show: false },
         },
         series: [
           {
             type: "radar",
-            data: spec.series.map((s) => ({ name: s.name, value: s.data as number[] })),
-            areaStyle: { opacity: 0.15 },
+            data: series.map((s) => ({ name: s.name, value: s.data as number[] })),
+            areaStyle: { opacity: 0.14 },
             lineStyle: { width: 2 },
+            symbolSize: 4,
           },
-        ],
+        ] as any,
       };
 
-    case "gauge": {
-      const v = spec.series[0]?.data[0] ?? 0;
+    case "parallel":
+      // Each series is its own ECharts series (for legend + colour), so axis
+      // extents must be set explicitly or they scale to the first series alone.
       return {
         ...base,
-        legend: undefined,
-        series: [
-          {
-            type: "gauge",
-            startAngle: 200,
-            endAngle: -20,
-            min: 0,
-            max: 100,
-            progress: { show: true, width: 14, itemStyle: { color: SERIES[0] } },
-            axisLine: { lineStyle: { width: 14, color: [[1, INK.grid]] } },
+        parallelAxis: cats.map((c, i) => {
+          const col = series.map((s) => s.data[i] ?? 0);
+          const lo = Math.min(...col, 0);
+          const hi = Math.max(...col, 1);
+          return {
+            dim: i,
+            name: clip(11)(c),
+            min: lo,
+            max: hi,
+            nameLocation: "end" as const,
+            nameGap: 12,
+            nameTextStyle: { color: INK.secondary, fontSize: MICRO, fontFamily: FONT },
+            axisLine: { lineStyle: { color: INK.axis } },
             axisTick: { show: false },
-            splitLine: { show: false },
-            axisLabel: { show: false },
-            pointer: { show: false },
-            detail: {
-              valueAnimation: true,
-              color: INK.primary,
-              fontSize: 30,
-              offsetCenter: [0, "10%"],
-              formatter: `{value}${spec.yAxis?.unit ?? ""}`,
-            },
-            data: [{ value: v ?? 0 }],
-          },
-        ],
+            axisLabel: { color: INK.muted, fontSize: MICRO, formatter: (v: number) => abbrev(v) },
+          };
+        }),
+        parallel: { left: 38, right: 38, top: 34, bottom: bottomGap + 12 },
+        series: series.map((s) => ({
+          type: "parallel",
+          name: s.name,
+          data: [s.data],
+          smooth: true,
+          lineStyle: { width: 2, opacity: 0.75 },
+          emphasis: { lineStyle: { width: 3, opacity: 1 } },
+        })) as any,
       };
-    }
-
-    case "sankey": {
-      const links = spec.links ?? [];
-      const names = [...new Set(links.flatMap((l) => [l.from, l.to]))];
-      return {
-        ...base,
-        legend: undefined,
-        series: [
-          {
-            type: "sankey",
-            data: names.map((n) => ({ name: n })),
-            links: links.map((l) => ({ source: l.from, target: l.to, value: l.value })),
-            emphasis: { focus: "adjacency" },
-            lineStyle: { color: "gradient", opacity: 0.35 },
-            label: { color: INK.secondary, fontSize: 11 },
-            itemStyle: { borderWidth: 0 },
-          },
-        ],
-      };
-    }
 
     case "heatmap": {
       const data: [number, number, number][] = [];
-      spec.series.forEach((row, y) => row.data.forEach((v, x) => data.push([x, y, v ?? 0])));
+      series.forEach((row, y) => row.data.forEach((v, x) => data.push([x, y, v ?? 0])));
       const vals = data.map((d) => d[2]);
       return {
         ...base,
-        legend: undefined,
-        grid: { left: 8, right: 16, top: 8, bottom: 48, containLabel: true },
-        xAxis: { type: "category", data: cats, splitArea: { show: false }, ...axis },
-        yAxis: { type: "category", data: spec.series.map((s) => s.name), splitArea: { show: false }, ...axis },
+        grid: { left: 6, right: 14, top: 10, bottom: 50, containLabel: true },
+        xAxis: { ...catAxis, data: cats, splitArea: { show: false } },
+        yAxis: { ...catAxis, data: series.map((s) => clip(16)(s.name)), splitArea: { show: false } },
         visualMap: {
           min: Math.min(...vals, 0),
           max: Math.max(...vals, 1),
           orient: "horizontal",
           left: "center",
-          bottom: 0,
-          itemWidth: 10,
-          itemHeight: 60,
+          bottom: 2,
+          itemWidth: 9,
+          itemHeight: 54,
           inRange: { color: SEQUENTIAL },
-          textStyle: { color: INK.muted, fontSize: 10 },
+          textStyle: { color: INK.muted, fontSize: MICRO },
         },
         series: [
           {
             type: "heatmap",
             data,
             itemStyle: { borderColor: "#141413", borderWidth: 2, borderRadius: 2 },
-            label: { show: data.length <= 60, color: INK.primary, fontSize: 10 },
+            label: {
+              show: data.length <= 48,
+              color: INK.primary,
+              fontSize: MICRO,
+              formatter: (p: any) => abbrev(p.value[2]),
+            },
           },
-        ],
+        ] as any,
       };
     }
   }

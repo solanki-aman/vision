@@ -1,54 +1,73 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { UIMessage } from "ai";
 
-const TOOL_VERB: Record<string, string> = {
-  add_chart: "charting",
-  add_kpi: "pinning a metric",
-  add_table: "tabulating",
-  add_narrative: "annotating",
-  generate_image: "imagining",
-  update_widget: "revising",
-  remove_widget: "clearing",
-  web_search: "searching the web",
-  x_search: "searching X",
-  code_execution: "running code",
+const VERB: Record<string, string> = {
+  add_chart: "charted",
+  add_kpi: "pinned a metric",
+  add_table: "tabulated",
+  add_narrative: "annotated",
+  generate_image: "imagined",
+  update_widget: "revised",
+  remove_widget: "cleared",
+  web_search: "searched the web",
+  x_search: "searched X",
+  code_execution: "ran code",
 };
+
+type Kind = "you" | "say" | "think" | "act";
 
 interface Entry {
   key: string;
-  kind: "you" | "say" | "think" | "act";
+  kind: Kind;
   text: string;
-  done?: boolean;
+  count: number;
+  sources: string[];
 }
 
-function toEntries(messages: UIMessage[]): Entry[] {
+function domain(url: string) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
+/** Consecutive identical activities collapse into one row with a count. */
+function build(messages: UIMessage[]): Entry[] {
   const out: Entry[] = [];
+  const push = (kind: Kind, text: string, key: string, sources: string[] = []) => {
+    const last = out[out.length - 1];
+    if (last && last.kind === kind && last.text === text) {
+      last.count += 1;
+      for (const s of sources) if (!last.sources.includes(s)) last.sources.push(s);
+      return;
+    }
+    out.push({ key, kind, text, count: 1, sources: [...new Set(sources)] });
+  };
+
   messages.forEach((m, mi) => {
     if (m.role === "user") {
       const t = m.parts.find((p) => p.type === "text") as { text?: string } | undefined;
-      if (t?.text) out.push({ key: `${mi}-u`, kind: "you", text: t.text });
+      if (t?.text) push("you", t.text, `${mi}-u`);
       return;
     }
+
     m.parts.forEach((part, pi) => {
       const key = `${mi}-${pi}`;
       if (part.type === "text" && part.text.trim()) {
-        out.push({ key, kind: "say", text: part.text });
+        push("say", part.text.trim(), key);
       } else if (part.type === "reasoning" && part.text.trim()) {
-        out.push({ key, kind: "think", text: part.text });
+        push("think", part.text.trim(), key);
+      } else if (part.type === "source-url") {
+        const d = domain((part as { url: string }).url);
+        const last = out[out.length - 1];
+        if (d && last && last.kind === "act" && !last.sources.includes(d)) last.sources.push(d);
       } else if (part.type.startsWith("tool-")) {
         const name = part.type.slice(5);
-        const p = part as { state?: string; input?: any };
-        const verb = TOOL_VERB[name] ?? name;
-        let detail = "";
-        if (p.input?.title) detail = p.input.title;
-        else if (p.input?.query) detail = p.input.query;
-        else if (p.input?.prompt) detail = String(p.input.prompt).slice(0, 60);
-        out.push({
-          key,
-          kind: "act",
-          text: detail ? `${verb} — ${detail}` : verb,
-          done: p.state === "output-available" || p.state === "output-error",
-        });
+        const p = part as { input?: any };
+        const verb = VERB[name] ?? name.replace(/_/g, " ");
+        const detail = p.input?.title ?? p.input?.query ?? "";
+        push("act", detail ? `${verb} — ${detail}` : verb, key);
       }
     });
   });
@@ -66,13 +85,13 @@ export function StreamRail({
   open: boolean;
   onToggle: () => void;
 }) {
-  const entries = toEntries(messages);
-  const end = useRef<HTMLDivElement>(null);
+  const entries = useMemo(() => build(messages), [messages]);
   const [showThinking, setShowThinking] = useState(true);
+  const end = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     end.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [entries.length]);
+  }, [entries.length, busy]);
 
   const visible = showThinking ? entries : entries.filter((e) => e.kind !== "think");
 
@@ -102,16 +121,31 @@ export function StreamRail({
               Reasoning, searches, and narration appear here. The answers appear on the canvas.
             </p>
           )}
+
           {visible.map((e) => (
             <div key={e.key} className={`entry ${e.kind}`}>
               <span className="entry-mark" aria-hidden />
-              <span className="entry-text">{e.text}</span>
+              <div className="entry-main">
+                <span className="entry-text">
+                  {e.text}
+                  {e.count > 1 && <span className="entry-count">×{e.count}</span>}
+                </span>
+                {e.sources.length > 0 && (
+                  <span className="entry-sources">
+                    {e.sources.slice(0, 4).join(" · ")}
+                    {e.sources.length > 4 ? ` +${e.sources.length - 4}` : ""}
+                  </span>
+                )}
+              </div>
             </div>
           ))}
+
           {busy && (
             <div className="entry pulse">
               <span className="entry-mark" aria-hidden />
-              <span className="entry-text">thinking</span>
+              <div className="entry-main">
+                <span className="entry-text">working</span>
+              </div>
             </div>
           )}
           <div ref={end} />

@@ -22,6 +22,8 @@ services:
       XAI_API_KEY: ${XAI_API_KEY:-}
       XAI_MODEL: ${XAI_MODEL:-grok-4.5}
       PORT: 3001
+      # macOS bind mounts do not forward inotify events; poll instead.
+      CHOKIDAR_USEPOLLING: "true"
     ports:
       - "3001:3001"
     depends_on:
@@ -34,6 +36,7 @@ services:
     build: ./web
     environment:
       VITE_API_PROXY: http://server:3001
+      CHOKIDAR_USEPOLLING: "true"
     ports:
       - "5173:5173"
     depends_on:

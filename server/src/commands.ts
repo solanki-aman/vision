@@ -24,6 +24,36 @@ const DEFAULT_SIZE: Record<WidgetKind, { w: number; h: number }> = {
   image: { w: 4, h: 5 },
 };
 
+// Some forms need room to breathe; others read fine small.
+const CHART_SIZE: Record<string, { w: number; h: number }> = {
+  gauge: { w: 3, h: 4 },
+  pie: { w: 4, h: 5 },
+  donut: { w: 4, h: 5 },
+  rose: { w: 4, h: 5 },
+  funnel: { w: 4, h: 5 },
+  radar: { w: 4, h: 5 },
+  sunburst: { w: 5, h: 6 },
+  treemap: { w: 6, h: 5 },
+  tree: { w: 6, h: 5 },
+  sankey: { w: 8, h: 6 },
+  chord: { w: 5, h: 6 },
+  graph: { w: 5, h: 6 },
+  calendar: { w: 12, h: 4 },
+  heatmap: { w: 7, h: 5 },
+  parallel: { w: 8, h: 5 },
+  theme_river: { w: 8, h: 5 },
+  candlestick: { w: 8, h: 5 },
+  boxplot: { w: 6, h: 5 },
+};
+
+function sizeFor(kind: WidgetKind, spec: unknown) {
+  if (kind === "chart") {
+    const type = (spec as { chartType?: string })?.chartType;
+    if (type && CHART_SIZE[type]) return CHART_SIZE[type];
+  }
+  return DEFAULT_SIZE[kind];
+}
+
 /** Next free row-major slot in a 12-col grid — placements are server-generated (plan §2.10). */
 async function nextSlot(client: pg.PoolClient, canvasId: string, w: number, h: number) {
   const { rows } = await client.query(
@@ -84,7 +114,7 @@ export async function applyChangeSet(
             errors.push(`add_widget "${op.title}": ${parsed.error.issues.map((i) => `${i.path.join(".")} ${i.message}`).join("; ")}`);
             continue;
           }
-          const size = op.size ?? DEFAULT_SIZE[op.widgetKind];
+          const size = op.size ?? sizeFor(op.widgetKind, parsed.data);
           const { x, y } = await nextSlot(client, canvasId, size.w, size.h);
           const { rows } = await client.query(
             `INSERT INTO canvas.widgets (canvas_id, kind, title, spec, provenance)

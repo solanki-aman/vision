@@ -1,37 +1,78 @@
 import { z } from "zod";
 
+export const CHART_TYPES = [
+  // over time / across categories — needs xAxis.categories + series
+  "line", "area", "stacked_area", "step_line", "bar", "horizontal_bar",
+  "stacked_bar", "stacked_horizontal_bar", "pictorial_bar", "scatter",
+  "effect_scatter", "bubble", "waterfall", "theme_river",
+  // part of a whole — needs xAxis.categories + one series
+  "pie", "donut", "rose", "funnel", "gauge",
+  // hierarchy — needs `hierarchy`
+  "treemap", "sunburst", "tree",
+  // relationships — needs `links`
+  "sankey", "graph", "chord",
+  // distributions and matrices
+  "boxplot", "candlestick", "heatmap", "calendar", "radar", "parallel",
+] as const;
+
 export const chartSpec = z.object({
-  chartType: z.enum([
-    "line",
-    "area",
-    "bar",
-    "horizontal_bar",
-    "stacked_bar",
-    "pie",
-    "donut",
-    "scatter",
-    "radar",
-    "heatmap",
-    "waterfall",
-    "gauge",
-    "sankey",
-  ]),
+  chartType: z.enum(CHART_TYPES),
   xAxis: z
     .object({ label: z.string().optional(), categories: z.array(z.string()) })
-    .optional(),
+    .optional()
+    .describe("Category or time axis. Required for cartesian, part-of-whole, radar and heatmap types."),
   yAxis: z
     .object({ label: z.string().optional(), unit: z.string().optional() })
     .optional(),
-  series: z.array(
-    z.object({
-      name: z.string(),
-      data: z.array(z.number().nullable()),
-    }),
-  ),
+  series: z
+    .array(z.object({ name: z.string(), data: z.array(z.number().nullable()) }))
+    .default([])
+    .describe(
+      "One entry per line/bar/slice group, aligned to xAxis.categories. For heatmap, one entry per row. For bubble, the second series carries point sizes.",
+    ),
   links: z
     .array(z.object({ from: z.string(), to: z.string(), value: z.number() }))
     .optional()
-    .describe("Sankey only: flows between node names."),
+    .describe("sankey, graph and chord: weighted connections between node names."),
+  hierarchy: z
+    .array(
+      z.object({
+        name: z.string(),
+        parent: z.string().optional().describe("Omit for root nodes."),
+        value: z.number().optional().describe("Leaf size. Parents are summed when omitted."),
+      }),
+    )
+    .optional()
+    .describe("treemap, sunburst and tree: a flat parent-child list, not a nested object."),
+  ohlc: z
+    .array(
+      z.object({
+        date: z.string(),
+        open: z.number(),
+        high: z.number(),
+        low: z.number(),
+        close: z.number(),
+      }),
+    )
+    .optional()
+    .describe("candlestick only."),
+  boxes: z
+    .array(
+      z.object({
+        name: z.string(),
+        min: z.number(),
+        q1: z.number(),
+        median: z.number(),
+        q3: z.number(),
+        max: z.number(),
+      }),
+    )
+    .optional()
+    .describe("boxplot only: five-number summary per group."),
+  calendar: z
+    .array(z.object({ date: z.string().describe("YYYY-MM-DD"), value: z.number() }))
+    .optional()
+    .describe("calendar only: one entry per day."),
 });
 
 export const kpiSpec = z.object({

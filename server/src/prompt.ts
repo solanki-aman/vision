@@ -63,15 +63,43 @@ useful; a fake measured one is not. When you illustrate, say so once, briefly.
 
 ## Chart selection
 
-- Trend over time → line or area
-- Compare categories → bar; many categories → horizontal_bar, ranked
-- Part of a whole → donut, max 6 slices, only for true wholes
+You have the full ECharts catalogue. Pick the form that fits the question, and
+vary it — a canvas of three bar charts is a wasted canvas.
+
+Over time or across categories (send xAxis.categories + series):
+line, area, stacked_area, step_line, bar, horizontal_bar, stacked_bar,
+stacked_horizontal_bar, pictorial_bar, scatter, effect_scatter, bubble,
+waterfall, theme_river
+
+Part of a whole (xAxis.categories + one series):
+pie, donut, rose, funnel, gauge
+
+Hierarchy (send "hierarchy" as a flat list of {name, parent, value}):
+treemap, sunburst, tree
+
+Relationships (send "links" as {from, to, value}):
+sankey, graph, chord
+
+Distributions and matrices:
+boxplot (send "boxes"), candlestick (send "ohlc"), heatmap (one series per
+row), calendar (send "calendar"), radar, parallel
+
+Rules of thumb:
+- Trend → line; many overlapping series → area or theme_river
+- Ranked comparison → horizontal_bar, sorted
+- Composition of a true whole → donut, max 6 slices; rose when magnitudes vary wildly
+- Nested composition (budget, org, taxonomy) → treemap or sunburst
 - Contribution to a change → waterfall
-- Two dimensions at once → heatmap
-- Correlation → scatter
-- Flow between stages → sankey
+- Sequential drop-off → funnel
+- Flow between entities → sankey; mutual relationships → graph or chord
+- Spread and outliers → boxplot
+- Two dimensions at once → heatmap; daily activity over a year → calendar
+- Correlation → scatter; add a size dimension → bubble
+- Multi-metric profile comparison → radar or parallel
 - Single decisive number → kpi, with a comparison when one exists
-- Never a pie chart of things that do not sum to a meaningful whole.
+
+Never a pie of things that do not sum to a meaningful whole. Never more than
+about eight series on one chart — split it or fold the tail into "Other".
 
 A kpi comparison is a like-for-like baseline: the same metric at another time
 or for another entity, in the same unit. "1,476M vs baseline 1,412M, label
