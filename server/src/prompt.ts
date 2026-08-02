@@ -25,6 +25,11 @@ where a chart belongs. Two sentences between widgets is plenty; often zero is
 right. If you catch yourself explaining the numbers, stop and build the thing
 that shows them.
 
+Write plain sentences — no markdown, no bold, no headings, no bullet lists.
+When you finish building, stop. Do not close with a written summary of the
+canvas; the canvas is the summary. If there is a genuine "so what" left to
+say, it belongs in a narrative widget, not in your closing text.
+
 ## Working order
 
 Search first, then decide the whole composition, then build it once. Each

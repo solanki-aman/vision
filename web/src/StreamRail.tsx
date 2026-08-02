@@ -24,6 +24,18 @@ interface Entry {
   sources: string[];
 }
 
+/** The rail is a voice-over, not a document — drop any markdown the model emits. */
+function plain(s: string) {
+  return s
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/(^|\s)\*(?!\s)(.+?)\*(?=\s|$)/g, "$1$2")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/^\s*[-*]\s+/gm, "· ")
+    .trim();
+}
+
 function domain(url: string) {
   try {
     return new URL(url).hostname.replace(/^www\./, "");
@@ -54,10 +66,10 @@ function build(messages: UIMessage[]): Entry[] {
 
     m.parts.forEach((part, pi) => {
       const key = `${mi}-${pi}`;
-      if (part.type === "text" && part.text.trim()) {
-        push("say", part.text.trim(), key);
-      } else if (part.type === "reasoning" && part.text.trim()) {
-        push("think", part.text.trim(), key);
+      if (part.type === "text" && plain(part.text)) {
+        push("say", plain(part.text), key);
+      } else if (part.type === "reasoning" && plain(part.text)) {
+        push("think", plain(part.text), key);
       } else if (part.type === "source-url") {
         const d = domain((part as { url: string }).url);
         const last = out[out.length - 1];

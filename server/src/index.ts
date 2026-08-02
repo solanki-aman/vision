@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import express from "express";
 import cors from "cors";
 import { createXai } from "@ai-sdk/xai";
@@ -113,7 +114,9 @@ app.post("/api/chat", async (req, res) => {
     originalMessages: messages,
     sendReasoning: true,
     sendSources: true,
-    onFinish: async ({ messages: final }) => {
+    generateMessageId: () => randomUUID(),
+    onFinish: async (event) => {
+      const final = event.messages;
       try {
         await saveMessages(
           canvasId,

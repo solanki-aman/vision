@@ -78,13 +78,34 @@ export async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_audit_time ON audit.events (occurred_at DESC);
 
     CREATE TABLE IF NOT EXISTS conversation.messages (
-      id TEXT PRIMARY KEY,
+      id TEXT NOT NULL,
       canvas_id UUID NOT NULL REFERENCES canvas.canvases(id) ON DELETE CASCADE,
       role TEXT NOT NULL,
       parts JSONB NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (canvas_id, id)
     );
     CREATE INDEX IF NOT EXISTS idx_messages_canvas ON conversation.messages (canvas_id, created_at);
+  `);
+
+  // Early builds keyed messages on id alone, so assistant ids collided across canvases.
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE table_schema='conversation' AND table_name='messages'
+          AND constraint_type='PRIMARY KEY' AND constraint_name='messages_pkey'
+      ) AND (
+        SELECT count(*) FROM information_schema.key_column_usage
+        WHERE table_schema='conversation' AND table_name='messages'
+          AND constraint_name='messages_pkey'
+      ) = 1 THEN
+        DELETE FROM conversation.messages WHERE id = '';
+        ALTER TABLE conversation.messages DROP CONSTRAINT messages_pkey;
+        ALTER TABLE conversation.messages ADD PRIMARY KEY (canvas_id, id);
+      END IF;
+    END $$;
   `);
 }
 
@@ -181,12 +202,13 @@ export async function saveMessages(
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    for (const m of messages) {
+    for (const [i, m] of messages.entries()) {
+      const id = m.id?.trim() || `${m.role}-${i}`;
       await client.query(
         `INSERT INTO conversation.messages (id, canvas_id, role, parts)
          VALUES ($1, $2, $3, $4)
-         ON CONFLICT (id) DO UPDATE SET parts = EXCLUDED.parts`,
-        [m.id, canvasId, m.role, JSON.stringify(m.parts)],
+         ON CONFLICT (canvas_id, id) DO UPDATE SET parts = EXCLUDED.parts`,
+        [id, canvasId, m.role, JSON.stringify(m.parts)],
       );
     }
     await client.query(`UPDATE canvas.canvases SET updated_at = now() WHERE id = $1`, [canvasId]);

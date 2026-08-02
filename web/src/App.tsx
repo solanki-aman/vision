@@ -47,8 +47,10 @@ function CanvasView({ canvasId, onTitle }: { canvasId: string; onTitle: (t: stri
     return () => es.close();
   }, [canvasId, refetch]);
 
+  // useChat only reads `messages` on first render, so the surface is keyed on
+  // the loaded history — otherwise a reload shows an empty stream.
   const { messages, sendMessage, status, error } = useChat({
-    id: canvasId,
+    id: `${canvasId}:${initial ? "ready" : "loading"}`,
     messages: initial ?? [],
     transport: new DefaultChatTransport({ api: "/api/chat", body: { canvasId } }),
   });
