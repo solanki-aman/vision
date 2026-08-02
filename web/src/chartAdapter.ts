@@ -1,5 +1,5 @@
 import type { EChartsOption } from "echarts";
-import { SERIES, SEQUENTIAL, INK } from "./theme";
+import type { ChartTheme } from "./theme";
 
 export type ChartType =
   | "line" | "area" | "stacked_area" | "step_line" | "bar" | "horizontal_bar"
@@ -37,44 +37,6 @@ function abbrev(n: number): string {
   return `${+n.toFixed(2)}`;
 }
 
-const catAxis = {
-  type: "category" as const,
-  axisTick: { show: false },
-  axisLine: { lineStyle: { color: INK.axis } },
-  axisLabel: { color: INK.muted, fontSize: LABEL, fontFamily: FONT, hideOverlap: true },
-  splitLine: { show: false },
-  nameTextStyle: { color: INK.muted, fontSize: MICRO },
-};
-
-const valAxis = {
-  type: "value" as const,
-  axisTick: { show: false },
-  axisLine: { show: false },
-  axisLabel: {
-    color: INK.muted,
-    fontSize: LABEL,
-    fontFamily: FONT,
-    formatter: (v: number) => abbrev(v),
-  },
-  splitLine: { lineStyle: { color: INK.grid, width: 1 } },
-  nameTextStyle: { color: INK.muted, fontSize: MICRO },
-};
-
-const legendBase = {
-  type: "scroll" as const,
-  bottom: 0,
-  icon: "roundRect",
-  itemWidth: 8,
-  itemHeight: 8,
-  itemGap: 14,
-  formatter: clip(22),
-  textStyle: { color: INK.secondary, fontSize: LABEL, fontFamily: FONT },
-  pageTextStyle: { color: INK.muted, fontSize: MICRO },
-  pageIconColor: INK.secondary,
-  pageIconInactiveColor: INK.axis,
-  pageIconSize: 9,
-};
-
 const ITEM_TRIGGER = new Set<ChartType>([
   "pie", "donut", "rose", "funnel", "gauge", "scatter", "effect_scatter", "bubble",
   "heatmap", "calendar", "sankey", "graph", "chord", "treemap", "sunburst", "tree",
@@ -103,9 +65,67 @@ function toTree(items: NonNullable<ChartSpec["hierarchy"]>) {
   return roots.map(prune);
 }
 
+/** Vertical wash used for bar and area fills when the palette opts into gradients. */
+function wash(hex: string, mode: "light" | "dark") {
+  return {
+    type: "linear" as const,
+    x: 0,
+    y: 0,
+    x2: 0,
+    y2: 1,
+    colorStops: [
+      { offset: 0, color: hex },
+      { offset: 1, color: `${hex}${mode === "dark" ? "3d" : "33"}` },
+    ],
+  };
+}
+
 /** Typed spec in, renderer options out. The model never supplies ECharts config. */
-export function specToOption(spec: ChartSpec): EChartsOption {
+export function specToOption(spec: ChartSpec, theme: ChartTheme, animate = true): EChartsOption {
   const t = spec.chartType;
+  const SERIES = theme.series;
+  const SEQUENTIAL = theme.sequential;
+  const INK = theme.ink;
+  const fill = (i: number) =>
+    theme.gradient ? (wash(SERIES[i % SERIES.length], theme.mode) as any) : SERIES[i % SERIES.length];
+
+  const catAxis = {
+    type: "category" as const,
+    axisTick: { show: false },
+    axisLine: { lineStyle: { color: INK.axis } },
+    axisLabel: { color: INK.muted, fontSize: LABEL, fontFamily: FONT, hideOverlap: true },
+    splitLine: { show: false },
+    nameTextStyle: { color: INK.muted, fontSize: MICRO },
+  };
+
+  const valAxis = {
+    type: "value" as const,
+    axisTick: { show: false },
+    axisLine: { show: false },
+    axisLabel: {
+      color: INK.muted,
+      fontSize: LABEL,
+      fontFamily: FONT,
+      formatter: (v: number) => abbrev(v),
+    },
+    splitLine: { lineStyle: { color: INK.grid, width: 1 } },
+    nameTextStyle: { color: INK.muted, fontSize: MICRO },
+  };
+
+  const legendBase = {
+    type: "scroll" as const,
+    bottom: 0,
+    icon: "roundRect",
+    itemWidth: 8,
+    itemHeight: 8,
+    itemGap: 14,
+    formatter: clip(22),
+    textStyle: { color: INK.secondary, fontSize: LABEL, fontFamily: FONT },
+    pageTextStyle: { color: INK.muted, fontSize: MICRO },
+    pageIconColor: INK.secondary,
+    pageIconInactiveColor: INK.axis,
+    pageIconSize: 9,
+  };
   const cats = spec.xAxis?.categories ?? [];
   const series = spec.series ?? [];
   const unit = spec.yAxis?.unit ? ` ${spec.yAxis.unit}` : "";
@@ -115,12 +135,14 @@ export function specToOption(spec: ChartSpec): EChartsOption {
   const base: EChartsOption = {
     color: SERIES,
     backgroundColor: "transparent",
-    animationDuration: 550,
+    animation: animate,
+    animationDuration: 700,
+    animationDelay: (i: number) => i * 28,
     animationEasing: "cubicOut",
     textStyle: { color: INK.secondary, fontFamily: FONT, fontSize: LABEL },
     tooltip: {
       trigger: ITEM_TRIGGER.has(t) ? "item" : "axis",
-      backgroundColor: "rgba(18,18,17,0.96)",
+      backgroundColor: theme.mode === "dark" ? "rgba(18,18,17,0.96)" : "rgba(255,255,255,0.97)",
       borderColor: INK.border,
       borderWidth: 1,
       padding: [9, 12],
@@ -161,7 +183,7 @@ export function specToOption(spec: ChartSpec): EChartsOption {
           emphasis: { focus: "series" },
           areaStyle:
             t === "area" || t === "stacked_area"
-              ? { opacity: t === "stacked_area" ? 0.5 : 0.15, color: SERIES[i % SERIES.length] }
+              ? { opacity: t === "stacked_area" ? 0.75 : 0.22, color: fill(i) }
               : undefined,
         })) as any,
       };
@@ -170,12 +192,12 @@ export function specToOption(spec: ChartSpec): EChartsOption {
     case "stacked_bar":
       return {
         ...cartesian({ ...catAxis, data: cats }, { ...valAxis, name: spec.yAxis?.label }),
-        series: series.map((s) => ({
+        series: series.map((s, i) => ({
           type: "bar",
           name: s.name,
           data: s.data,
           stack: t === "stacked_bar" ? "total" : undefined,
-          itemStyle: { borderRadius: t === "stacked_bar" ? 2 : [4, 4, 0, 0] },
+          itemStyle: { color: fill(i), borderRadius: t === "stacked_bar" ? 2 : [4, 4, 0, 0] },
           barMaxWidth: 44,
           emphasis: { focus: "series" },
         })) as any,
@@ -188,12 +210,12 @@ export function specToOption(spec: ChartSpec): EChartsOption {
         grid: { left: 6, right: 18, top: 10, bottom: bottomGap + 12, containLabel: true },
         xAxis: { ...valAxis, name: spec.yAxis?.label, nameLocation: "middle", nameGap: 28 },
         yAxis: { ...catAxis, data: [...cats].reverse() },
-        series: series.map((s) => ({
+        series: series.map((s, i) => ({
           type: "bar",
           name: s.name,
           data: [...s.data].reverse(),
           stack: t === "stacked_horizontal_bar" ? "total" : undefined,
-          itemStyle: { borderRadius: t === "stacked_horizontal_bar" ? 2 : [0, 4, 4, 0] },
+          itemStyle: { color: fill(i), borderRadius: t === "stacked_horizontal_bar" ? 2 : [0, 4, 4, 0] },
           barMaxWidth: 26,
           emphasis: { focus: "series" },
         })) as any,
@@ -322,7 +344,7 @@ export function specToOption(spec: ChartSpec): EChartsOption {
             roseType: t === "rose" ? "area" : undefined,
             radius: t === "donut" ? ["46%", "72%"] : t === "rose" ? ["18%", "74%"] : "70%",
             center: ["50%", "44%"],
-            itemStyle: { borderColor: "#141413", borderWidth: 2, borderRadius: 3 },
+            itemStyle: { borderColor: INK.surface, borderWidth: 2, borderRadius: 3 },
             label: {
               color: INK.secondary,
               fontSize: MICRO,
@@ -352,7 +374,7 @@ export function specToOption(spec: ChartSpec): EChartsOption {
             gap: 2,
             minSize: "18%",
             label: { color: INK.primary, fontSize: LABEL, formatter: (p: any) => clip(20)(String(p.name)) },
-            itemStyle: { borderColor: "#141413", borderWidth: 2 },
+            itemStyle: { borderColor: INK.surface, borderWidth: 2 },
             data: cats.map((c, i) => ({ name: c, value: s.data[i] ?? 0 })),
           },
         ] as any,
@@ -406,7 +428,7 @@ export function specToOption(spec: ChartSpec): EChartsOption {
             breadcrumb: { show: false },
             label: { color: "#fff", fontSize: LABEL, fontFamily: FONT, formatter: (p: any) => clip(18)(String(p.name)) },
             upperLabel: { show: true, height: 20, color: INK.secondary, fontSize: MICRO },
-            itemStyle: { borderColor: "#141413", borderWidth: 2, gapWidth: 2, borderRadius: 3 },
+            itemStyle: { borderColor: INK.surface, borderWidth: 2, gapWidth: 2, borderRadius: 3 },
             levels: [{}, { itemStyle: { borderWidth: 2, gapWidth: 2 } }],
           },
         ] as any,
@@ -422,7 +444,7 @@ export function specToOption(spec: ChartSpec): EChartsOption {
             radius: ["16%", "92%"],
             center: ["50%", "50%"],
             nodeClick: false,
-            itemStyle: { borderColor: "#141413", borderWidth: 2 },
+            itemStyle: { borderColor: INK.surface, borderWidth: 2 },
             label: { color: "#fff", fontSize: MICRO, minAngle: 14, formatter: (p: any) => clip(12)(String(p.name)) },
           },
         ] as any,
@@ -580,7 +602,7 @@ export function specToOption(spec: ChartSpec): EChartsOption {
           right: 12,
           cellSize: ["auto", 13],
           range: year,
-          itemStyle: { color: "transparent", borderColor: "#141413", borderWidth: 2 },
+          itemStyle: { color: "transparent", borderColor: INK.surface, borderWidth: 2 },
           splitLine: { show: false },
           yearLabel: { show: false },
           dayLabel: { color: INK.muted, fontSize: MICRO, nameMap: "en" },
@@ -676,7 +698,7 @@ export function specToOption(spec: ChartSpec): EChartsOption {
           {
             type: "heatmap",
             data,
-            itemStyle: { borderColor: "#141413", borderWidth: 2, borderRadius: 2 },
+            itemStyle: { borderColor: INK.surface, borderWidth: 2, borderRadius: 2 },
             label: {
               show: data.length <= 48,
               color: INK.primary,

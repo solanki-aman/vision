@@ -4,6 +4,8 @@ import { DefaultChatTransport } from "ai";
 import type { UIMessage } from "ai";
 import { Canvas } from "./Canvas";
 import { StreamRail } from "./StreamRail";
+import { Settings } from "./Settings";
+import { useTheme } from "./ThemeContext";
 import type { CanvasState } from "./types";
 
 interface CanvasListItem {
@@ -161,6 +163,8 @@ export default function App() {
   const [active, setActive] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [navOpen, setNavOpen] = useState(false);
+  const [setOpen, setSetOpen] = useState(false);
+  const { mode, set } = useTheme();
 
   const refreshList = useCallback(async () => {
     const res = await fetch("/api/canvases");
@@ -210,6 +214,16 @@ export default function App() {
         </button>
         <span className="crumb">{title}</span>
         <div className="top-actions">
+          <button
+            className="icon"
+            title={mode === "dark" ? "Switch to light" : "Switch to dark"}
+            onClick={() => set({ mode: mode === "dark" ? "light" : "dark" })}
+          >
+            {mode === "dark" ? "☀" : "☾"}
+          </button>
+          <button className="icon" title="Settings" onClick={() => setSetOpen(true)}>
+            ⚙
+          </button>
           <button onClick={() => active && fetch(`/api/canvases/${active}/undo`, { method: "POST" })}>undo</button>
           <button className="primary" onClick={create}>
             new canvas
@@ -238,6 +252,8 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {setOpen && <Settings onClose={() => setSetOpen(false)} />}
 
       {active && <CanvasView key={active} canvasId={active} onTitle={setTitle} />}
     </div>

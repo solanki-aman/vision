@@ -1,10 +1,12 @@
 import { useEffect, useRef } from "react";
 import * as echarts from "echarts";
 import { specToOption, type ChartSpec } from "../chartAdapter";
-import { SERIES, STATUS } from "../theme";
+import { STATUS } from "../theme";
+import { useTheme } from "../ThemeContext";
 import type { KpiSpec, TableSpec, NarrativeSpec, ImageSpec, Widget } from "../types";
 
 function Chart({ spec }: { spec: ChartSpec }) {
+  const { chart: theme, animate } = useTheme();
   const el = useRef<HTMLDivElement>(null);
   const chart = useRef<echarts.ECharts | null>(null);
 
@@ -23,11 +25,11 @@ function Chart({ spec }: { spec: ChartSpec }) {
   useEffect(() => {
     if (!chart.current) return;
     try {
-      chart.current.setOption(specToOption(spec), true);
+      chart.current.setOption(specToOption(spec, theme, animate), true);
     } catch (e) {
       console.error("chart render failed", e, spec);
     }
-  }, [spec]);
+  }, [spec, theme, animate]);
 
   return <div className="chart-mount" ref={el} />;
 }
@@ -42,6 +44,7 @@ function fmt(n: number) {
 }
 
 function Sparkline({ points }: { points: number[] }) {
+  const { chart: theme } = useTheme();
   if (points.length < 2) return null;
   const min = Math.min(...points);
   const max = Math.max(...points);
@@ -51,7 +54,7 @@ function Sparkline({ points }: { points: number[] }) {
     .join(" ");
   return (
     <svg className="spark" viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden>
-      <polyline points={d} fill="none" stroke={SERIES[0]} strokeWidth="1.6" vectorEffect="non-scaling-stroke" />
+      <polyline points={d} fill="none" stroke={theme.series[0]} strokeWidth="1.6" vectorEffect="non-scaling-stroke" />
     </svg>
   );
 }
