@@ -31,11 +31,17 @@ export interface ImageSpec {
   prompt: string;
 }
 
+export interface ControlSpec {
+  control: "range";
+  label: string;
+  targets: string[];
+}
+
 export interface Widget {
   id: string;
-  kind: "chart" | "kpi" | "table" | "narrative" | "image";
+  kind: "chart" | "kpi" | "table" | "narrative" | "image" | "control";
   title: string;
-  spec: ChartSpec | KpiSpec | TableSpec | NarrativeSpec | ImageSpec;
+  spec: ChartSpec | KpiSpec | TableSpec | NarrativeSpec | ImageSpec | ControlSpec;
   provenance: Provenance | null;
   x: number;
   y: number;

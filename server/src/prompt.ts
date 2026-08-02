@@ -41,8 +41,8 @@ row plan. This is not optional polish — it is the step that makes the canvas
 readable. Do it on every turn that adds or removes widgets.
 
 Row heights:
-- "kpi" — 120px. Metric tiles only. Never put a chart in a kpi row.
-- "short" — 200px. Sparse charts, gauges, a one-line note.
+- "kpi" — 175px. Metric tiles only. Never put a chart in a kpi row.
+- "short" — 255px. Sliders, gauges, a one-line note.
 - "standard" — 320px. The workhorse for almost every chart.
 - "tall" — 440px. Dense forms: sankey, treemap, sunburst, heatmaps with many
   rows, tables with many rows.
@@ -69,6 +69,21 @@ Rules:
 
 You may also pass a size {span, height} on each add_* call as you build, but
 set_layout at the end is what actually composes the dashboard.
+
+## Interactivity
+
+Two ways to make a dashboard explorable:
+
+- Set "zoom": true on any chart with a long x-axis (roughly 20+ points). This
+  puts a draggable range slider under that one chart.
+- Call add_control with a "range" slider whose targets are several chart
+  widget ids. Dragging it narrows the x-axis of every target at once. Use this
+  when a dashboard has one shared time axis — monthly actuals, a bookings
+  trend, a burn-down. Add it after the charts exist, and place it in its own
+  "short" row directly above the charts it filters.
+
+Only point a control at charts that share the same x-axis. A slider wired to
+charts with different periods is worse than no slider.
 
 ## Chart selection
 

@@ -1,10 +1,10 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { chartSpec, kpiSpec, tableSpec, narrativeSpec, provenance } from "./specs.js";
+import { chartSpec, kpiSpec, tableSpec, narrativeSpec, controlSpec, provenance } from "./specs.js";
 import { applyChangeSet, applyLayout, type Operation } from "./commands.js";
 import { generateImage } from "./imagine.js";
 
-const HEIGHT_ROWS = { kpi: 3, short: 5, standard: 8, tall: 11 } as const;
+const HEIGHT_ROWS = { kpi: 4, short: 6, standard: 8, tall: 11 } as const;
 
 const size = z
   .object({
@@ -63,6 +63,21 @@ export function buildTools(canvasId: string, onChange: () => void) {
       inputSchema: z.object({ ...titled, spec: narrativeSpec }),
       execute: async ({ title, spec, provenance, size }) =>
         place({ kind: "add_widget", widgetKind: "narrative", title, spec, provenance, size: toSize(size) }),
+    }),
+
+    add_control: tool({
+      description:
+        "Place a draggable range slider that filters other chart widgets on the canvas. Call this AFTER the charts exist, passing their widget ids as targets. Use it when a dashboard has a shared time axis the user will want to narrow.",
+      inputSchema: z.object({ title: z.string(), spec: controlSpec, size }),
+      execute: async ({ title, spec, size }) =>
+        place({
+          kind: "add_widget",
+          widgetKind: "control",
+          title,
+          spec,
+          provenance: { source: "Canvas control", confidence: "measured" },
+          size: toSize(size),
+        }),
     }),
 
     generate_image: tool({

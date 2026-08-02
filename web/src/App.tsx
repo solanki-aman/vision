@@ -6,6 +6,7 @@ import { Canvas } from "./Canvas";
 import { StreamRail } from "./StreamRail";
 import { Settings } from "./Settings";
 import { useTheme } from "./ThemeContext";
+import { FilterProvider } from "./FilterContext";
 import type { CanvasState } from "./types";
 
 interface CanvasListItem {
@@ -94,6 +95,7 @@ function CanvasView({ canvasId, onTitle }: { canvasId: string; onTitle: (t: stri
   const empty = state.widgets.length === 0;
 
   return (
+    <FilterProvider>
     <div className={`stage ${railOpen ? "" : "wide"}`}>
       <div className="board">
         {empty && !busy && (
@@ -155,6 +157,7 @@ function CanvasView({ canvasId, onTitle }: { canvasId: string; onTitle: (t: stri
         </form>
       </div>
     </div>
+    </FilterProvider>
   );
 }
 

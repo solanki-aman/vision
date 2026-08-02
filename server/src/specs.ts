@@ -73,6 +73,19 @@ export const chartSpec = z.object({
     .array(z.object({ date: z.string().describe("YYYY-MM-DD"), value: z.number() }))
     .optional()
     .describe("calendar only: one entry per day."),
+  zoom: z
+    .boolean()
+    .optional()
+    .describe("Adds a draggable range slider under the chart. Use for long time series (20+ points)."),
+});
+
+export const controlSpec = z.object({
+  control: z.literal("range").describe("A draggable range slider."),
+  label: z.string().describe("What the slider filters, e.g. 'Period' or 'Months shown'."),
+  targets: z
+    .array(z.string())
+    .min(1)
+    .describe("Widget ids this slider filters. Chart widgets only; they must share an x-axis."),
 });
 
 export const kpiSpec = z.object({
@@ -123,7 +136,7 @@ export const provenance = z.object({
   note: z.string().optional(),
 });
 
-export const WIDGET_KINDS = ["chart", "kpi", "table", "narrative", "image"] as const;
+export const WIDGET_KINDS = ["chart", "kpi", "table", "narrative", "image", "control"] as const;
 export type WidgetKind = (typeof WIDGET_KINDS)[number];
 
 const specByKind = {
@@ -132,6 +145,7 @@ const specByKind = {
   table: tableSpec,
   narrative: narrativeSpec,
   image: imageSpec,
+  control: controlSpec,
 };
 
 export function validateSpec(kind: WidgetKind, spec: unknown) {

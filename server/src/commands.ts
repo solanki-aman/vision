@@ -18,7 +18,7 @@ export interface ApplyResult {
 const GRID_COLS = 12;
 
 /** Row heights in grid units. One unit is 40px, so a kpi band is 120px. */
-export const HEIGHTS = { kpi: 3, short: 5, standard: 8, tall: 11 } as const;
+export const HEIGHTS = { kpi: 4, short: 6, standard: 8, tall: 11 } as const;
 export type HeightName = keyof typeof HEIGHTS;
 
 const DEFAULT_SIZE: Record<WidgetKind, { w: number; h: number }> = {
@@ -27,6 +27,7 @@ const DEFAULT_SIZE: Record<WidgetKind, { w: number; h: number }> = {
   table: { w: 6, h: HEIGHTS.standard },
   narrative: { w: 4, h: HEIGHTS.standard },
   image: { w: 4, h: HEIGHTS.standard },
+  control: { w: 12, h: 2 },
 };
 
 // Forms that need width or breathing room when the agent does not say.

@@ -3,10 +3,13 @@ import * as echarts from "echarts";
 import { specToOption, type ChartSpec } from "../chartAdapter";
 import { STATUS } from "../theme";
 import { useTheme } from "../ThemeContext";
-import type { KpiSpec, TableSpec, NarrativeSpec, ImageSpec, Widget } from "../types";
+import type { KpiSpec, TableSpec, NarrativeSpec, ImageSpec, ControlSpec, Widget } from "../types";
+import { useFilters, applyWindow } from "../FilterContext";
 
-function Chart({ spec }: { spec: ChartSpec }) {
+function Chart({ spec, widgetId }: { spec: ChartSpec; widgetId: string }) {
   const { chart: theme, animate } = useTheme();
+  const { windows } = useFilters();
+  const view = applyWindow(spec, windows[widgetId]);
   const el = useRef<HTMLDivElement>(null);
   const chart = useRef<echarts.ECharts | null>(null);
 
@@ -25,11 +28,11 @@ function Chart({ spec }: { spec: ChartSpec }) {
   useEffect(() => {
     if (!chart.current) return;
     try {
-      chart.current.setOption(specToOption(spec, theme, animate), true);
+      chart.current.setOption(specToOption(view, theme, animate), true);
     } catch (e) {
-      console.error("chart render failed", e, spec);
+      console.error("chart render failed", e, view);
     }
-  }, [spec, theme, animate]);
+  }, [view, theme, animate]);
 
   return <div className="chart-mount" ref={el} />;
 }
@@ -137,10 +140,43 @@ function Img({ spec }: { spec: ImageSpec }) {
   return <img className="gen-image" src={spec.url} alt={spec.prompt} loading="lazy" />;
 }
 
+function RangeControl({ spec }: { spec: ControlSpec }) {
+  const { windows, setWindow } = useFilters();
+  const current = windows[spec.targets[0]] ?? [0, 100];
+  const [lo, hi] = current;
+
+  const move = (which: 0 | 1) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = Number(e.target.value);
+    const next: [number, number] = which === 0 ? [Math.min(v, hi - 5), hi] : [lo, Math.max(v, lo + 5)];
+    setWindow(spec.targets, next);
+  };
+
+  return (
+    <div className="range">
+      <div className="range-head">
+        <span className="range-label">{spec.label}</span>
+        <span className="range-value">
+          {Math.round(lo)}% – {Math.round(hi)}%
+          <button className="range-reset" onClick={() => setWindow(spec.targets, [0, 100])}>
+            reset
+          </button>
+        </span>
+      </div>
+      <div className="range-track">
+        <span className="range-fill" style={{ left: `${lo}%`, right: `${100 - hi}%` }} />
+        <input type="range" min={0} max={100} value={lo} onChange={move(0)} aria-label={`${spec.label} start`} />
+        <input type="range" min={0} max={100} value={hi} onChange={move(1)} aria-label={`${spec.label} end`} />
+      </div>
+    </div>
+  );
+}
+
 export function WidgetBody({ widget }: { widget: Widget }) {
   switch (widget.kind) {
     case "chart":
-      return <Chart spec={widget.spec as ChartSpec} />;
+      return <Chart spec={widget.spec as ChartSpec} widgetId={widget.id} />;
+    case "control":
+      return <RangeControl spec={widget.spec as ControlSpec} />;
     case "kpi":
       return <Kpi spec={widget.spec as KpiSpec} />;
     case "table":

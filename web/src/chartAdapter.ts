@@ -20,6 +20,7 @@ export interface ChartSpec {
   ohlc?: { date: string; open: number; high: number; low: number; close: number }[];
   boxes?: { name: string; min: number; q1: number; median: number; q3: number; max: number }[];
   calendar?: { date: string; value: number }[];
+  zoom?: boolean;
 }
 
 const FONT = "system-ui, -apple-system, 'Segoe UI', sans-serif";
@@ -152,7 +153,25 @@ export function specToOption(spec: ChartSpec, theme: ChartTheme, animate = true)
         typeof v === "number" ? `${v.toLocaleString()}${unit}` : String(v ?? ""),
     },
     legend: showLegend ? legendBase : undefined,
-    grid: { left: 6, right: 14, top: 10, bottom: bottomGap, containLabel: true },
+    grid: { left: 6, right: 14, top: 10, bottom: bottomGap + (spec.zoom ? 30 : 0), containLabel: true },
+    dataZoom: spec.zoom
+      ? [
+          { type: "inside" },
+          {
+            type: "slider",
+            height: 18,
+            bottom: showLegend ? 28 : 4,
+            borderColor: "transparent",
+            backgroundColor: INK.grid,
+            fillerColor: theme.mode === "dark" ? "rgba(57,135,229,0.22)" : "rgba(42,120,214,0.16)",
+            handleStyle: { color: SERIES[0], borderColor: SERIES[0] },
+            moveHandleStyle: { color: SERIES[0] },
+            dataBackground: { lineStyle: { color: INK.axis }, areaStyle: { color: "transparent" } },
+            selectedDataBackground: { lineStyle: { color: SERIES[0] }, areaStyle: { color: "transparent" } },
+            textStyle: { color: INK.muted, fontSize: MICRO },
+          },
+        ]
+      : undefined,
   };
 
   const cartesian = (x: object, y: object) => ({
