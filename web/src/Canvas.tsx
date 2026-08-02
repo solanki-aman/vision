@@ -12,6 +12,7 @@ const CONFIDENCE_LABEL = {
 
 interface Props {
   widgets: Widget[];
+  entities: Record<string, string>;
   /** Present mode: rows with y above this stay hidden. null = not presenting. */
   revealY: number | null;
   onLayoutChange: (ops: { kind: "move_widget" | "resize_widget"; widgetId: string; x?: number; y?: number; w?: number; h?: number }[]) => void;
@@ -26,7 +27,7 @@ function columnsFor(width: number) {
   return FULL_COLUMNS;
 }
 
-export function Canvas({ widgets, revealY, onLayoutChange, onRemove }: Props) {
+export function Canvas({ widgets, entities, revealY, onLayoutChange, onRemove }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const grid = useRef<GridStack | null>(null);
   const items = useRef(new Map<string, HTMLDivElement>());
@@ -168,7 +169,7 @@ export function Canvas({ widgets, revealY, onLayoutChange, onRemove }: Props) {
             </header>
             )}
             <div className="widget-body">
-              <WidgetBody widget={w} />
+              <WidgetBody widget={w} entities={entities} />
             </div>
             {w.provenance && (
               <footer className={`prov prov-${w.provenance.confidence}`}>

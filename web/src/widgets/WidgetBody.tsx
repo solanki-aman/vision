@@ -5,8 +5,9 @@ import { STATUS } from "../theme";
 import { useTheme } from "../ThemeContext";
 import type { KpiSpec, TableSpec, NarrativeSpec, ImageSpec, ControlSpec, LabelSpec, StatementSpec, HeroSpec, Widget } from "../types";
 import { useFilters, applyWindow } from "../FilterContext";
+import { matchEntity } from "../entities";
 
-function Chart({ spec, widgetId }: { spec: ChartSpec; widgetId: string }) {
+function Chart({ spec, widgetId, entities }: { spec: ChartSpec; widgetId: string; entities: Record<string, string> }) {
   const { chart: theme, animate } = useTheme();
   const { windows } = useFilters();
   const view = applyWindow(spec, windows[widgetId]);
@@ -28,11 +29,11 @@ function Chart({ spec, widgetId }: { spec: ChartSpec; widgetId: string }) {
   useEffect(() => {
     if (!chart.current) return;
     try {
-      chart.current.setOption(specToOption(view, theme, animate), true);
+      chart.current.setOption(specToOption(view, theme, animate, entities), true);
     } catch (e) {
       console.error("chart render failed", e, view);
     }
-  }, [view, theme, animate]);
+  }, [view, theme, animate, entities]);
 
   // Presentation mode re-runs the entrance animation when a row is revealed.
   useEffect(() => {
@@ -43,14 +44,14 @@ function Chart({ spec, widgetId }: { spec: ChartSpec; widgetId: string }) {
       if (!c) return;
       c.clear();
       try {
-        c.setOption(specToOption(view, theme, true));
+        c.setOption(specToOption(view, theme, true, entities));
       } catch {
         /* keep presenting */
       }
     };
     node.addEventListener("vision:replay", replay);
     return () => node.removeEventListener("vision:replay", replay);
-  }, [view, theme]);
+  }, [view, theme, entities]);
 
   return <div className="chart-mount" ref={el} />;
 }
@@ -64,7 +65,7 @@ function fmt(n: number) {
   return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
-function Sparkline({ points }: { points: number[] }) {
+function Sparkline({ points, color }: { points: number[]; color?: string }) {
   const { chart: theme } = useTheme();
   if (points.length < 2) return null;
   const min = Math.min(...points);
@@ -75,12 +76,12 @@ function Sparkline({ points }: { points: number[] }) {
     .join(" ");
   return (
     <svg className="spark" viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden>
-      <polyline points={d} fill="none" stroke={theme.series[0]} strokeWidth="1.6" vectorEffect="non-scaling-stroke" />
+      <polyline points={d} fill="none" stroke={color ?? theme.series[0]} strokeWidth="1.6" vectorEffect="non-scaling-stroke" />
     </svg>
   );
 }
 
-function Kpi({ spec }: { spec: KpiSpec }) {
+function Kpi({ spec, accent }: { spec: KpiSpec; accent?: string }) {
   const c = spec.comparison;
   const delta = c ? spec.value - c.baseline : 0;
   const pct = c && c.baseline !== 0 ? (delta / Math.abs(c.baseline)) * 100 : null;
@@ -96,6 +97,7 @@ function Kpi({ spec }: { spec: KpiSpec }) {
         {spec.unit && <span className="kpi-unit">{spec.unit}</span>}
       </div>
       <div className="kpi-label" title={spec.label}>
+        {accent && <span className="edot" style={{ background: accent }} aria-hidden />}
         {spec.label}
       </div>
       {c && (
@@ -105,12 +107,13 @@ function Kpi({ spec }: { spec: KpiSpec }) {
           <span className="kpi-vs">vs {c.label}</span>
         </div>
       )}
-      {spec.sparkline && spec.sparkline.length > 1 && <Sparkline points={spec.sparkline} />}
+      {spec.sparkline && spec.sparkline.length > 1 && <Sparkline points={spec.sparkline} color={accent} />}
     </div>
   );
 }
 
-function Table({ spec }: { spec: TableSpec }) {
+function Table({ spec, entities }: { spec: TableSpec; entities: Record<string, string> }) {
+  const firstKey = spec.columns[0]?.key;
   return (
     <div className="table-scroll">
       <table>
@@ -128,6 +131,9 @@ function Table({ spec }: { spec: TableSpec }) {
             <tr key={i}>
               {spec.columns.map((c) => (
                 <td key={c.key} style={{ textAlign: c.align ?? "left" }}>
+                  {c.key === firstKey && typeof r[c.key] === "string" && matchEntity(String(r[c.key]), entities) && (
+                    <span className="edot" style={{ background: matchEntity(String(r[c.key]), entities) }} aria-hidden />
+                  )}
                   {typeof r[c.key] === "number" ? fmt(r[c.key] as number) : (r[c.key] ?? "—")}
                 </td>
               ))}
@@ -229,10 +235,10 @@ function Hero({ spec }: { spec: HeroSpec }) {
   );
 }
 
-export function WidgetBody({ widget }: { widget: Widget }) {
+export function WidgetBody({ widget, entities }: { widget: Widget; entities: Record<string, string> }) {
   switch (widget.kind) {
     case "chart":
-      return <Chart spec={widget.spec as ChartSpec} widgetId={widget.id} />;
+      return <Chart spec={widget.spec as ChartSpec} widgetId={widget.id} entities={entities} />;
     case "control":
       return <RangeControl spec={widget.spec as ControlSpec} />;
     case "label":
@@ -242,9 +248,14 @@ export function WidgetBody({ widget }: { widget: Widget }) {
     case "hero":
       return <Hero spec={widget.spec as HeroSpec} />;
     case "kpi":
-      return <Kpi spec={widget.spec as KpiSpec} />;
+      return (
+        <Kpi
+          spec={widget.spec as KpiSpec}
+          accent={matchEntity(`${widget.title} ${(widget.spec as KpiSpec).label ?? ""}`, entities)}
+        />
+      );
     case "table":
-      return <Table spec={widget.spec as TableSpec} />;
+      return <Table spec={widget.spec as TableSpec} entities={entities} />;
     case "narrative":
       return <Narrative spec={widget.spec as NarrativeSpec} />;
     case "image":

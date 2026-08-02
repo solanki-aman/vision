@@ -416,6 +416,59 @@ export async function compact(canvasId: string) {
   return updates.length;
 }
 
+/**
+ * Snap ragged placements into clean rows: overlapping bands merge, each row
+ * takes one height, widths refill 12. Runs when a turn adds widgets without
+ * ever calling a layout tool.
+ */
+export async function normalizeRows(canvasId: string) {
+  const { rows } = await pool.query(
+    `SELECT widget_id, x, y, w, h FROM canvas.placements WHERE canvas_id = $1 ORDER BY y, x`,
+    [canvasId],
+  );
+  if (!rows.length) return 0;
+
+  const groups: (typeof rows)[] = [];
+  let cur: typeof rows = [];
+  let curEnd = -1;
+  for (const p of rows) {
+    if (!cur.length || p.y < curEnd) {
+      cur.push(p);
+      curEnd = Math.max(curEnd, p.y + p.h);
+    } else {
+      groups.push(cur);
+      cur = [p];
+      curEnd = p.y + p.h;
+    }
+  }
+  groups.push(cur);
+
+  let y = 0;
+  let changed = 0;
+  for (const g of groups) {
+    g.sort((a, b) => a.x - b.x);
+    const h = Math.max(...g.map((p) => p.h));
+    const total = g.reduce((a, p) => a + Math.max(1, p.w), 0);
+    let x = 0;
+    for (const [i, p] of g.entries()) {
+      let w = Math.max(2, Math.round((Math.max(1, p.w) / total) * GRID_COLS));
+      if (i === g.length - 1) w = Math.max(2, GRID_COLS - x);
+      w = Math.min(w, GRID_COLS - x);
+      if (w <= 0) continue;
+      if (p.x !== x || p.y !== y || p.w !== w || p.h !== h) {
+        await pool.query(`UPDATE canvas.placements SET x=$2, y=$3, w=$4, h=$5 WHERE widget_id=$1`, [
+          p.widget_id, x, y, w, h,
+        ]);
+        changed++;
+      }
+      x += w;
+    }
+    y += h;
+  }
+  if (changed) await audit("normalize_rows", "applied", "canvas", canvasId, { changed });
+  return changed;
+}
+
 /** Undo is a new change set of stored inverse operations — history is never deleted (plan §2.8). */
 export async function undoLast(canvasId: string) {
   const { rows } = await pool.query(

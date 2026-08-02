@@ -441,6 +441,26 @@ body {
 .kpi-vs { color: var(--faint); }
 .spark { width: 100%; height: 22px; margin-top: 7px; }
 
+.edot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: 1px;
+}
+
+/* Tiles must never clip: the body is a size container and trims extras first. */
+.widget.kind-kpi .widget-body { container-type: size; }
+@container (max-height: 132px) {
+  .spark { display: none; }
+  .kpi-label { -webkit-line-clamp: 1; }
+}
+@container (max-height: 96px) {
+  .kpi-value { font-size: 24px; }
+  .kpi-delta { display: none; }
+}
+
 /* table */
 .table-scroll { height: 100%; overflow: auto; }
 .table-scroll table { width: 100%; border-collapse: collapse; font-size: 12px; }
@@ -511,6 +531,10 @@ body {
   line-height: 1.55;
   color: var(--ink-2);
   max-width: 62ch;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 /* section label — a bare band, no card chrome */

@@ -15,8 +15,8 @@ import {
   audit,
   pool,
 } from "./db.js";
-import { applyChangeSet, undoLast, compact, type Operation } from "./commands.js";
-import { buildTools } from "./tools.js";
+import { applyChangeSet, undoLast, compact, normalizeRows, type Operation } from "./commands.js";
+import { buildTools, type TurnFlags } from "./tools.js";
 import { SYSTEM_PROMPT } from "./prompt.js";
 
 const xai = createXai({ apiKey: process.env.XAI_API_KEY ?? "" });
@@ -101,13 +101,14 @@ app.post("/api/chat", async (req, res) => {
 
   const summary = await getCanvasSummary(canvasId);
   await audit("agent_run", "started", "canvas", canvasId);
+  const turn: TurnFlags = { mutated: false, laidOut: false };
 
   const result = streamText({
     model: xai.responses(MODEL),
     system: `${SYSTEM_PROMPT}\n\n## Current canvas\n\n${summary}\n\nToday is ${new Date().toISOString().slice(0, 10)}.`,
     messages: await convertToModelMessages(messages),
     tools: {
-      ...buildTools(canvasId, () => notify(canvasId)),
+      ...buildTools(canvasId, () => notify(canvasId), turn),
       web_search: xai.tools.webSearch(),
       x_search: xai.tools.xSearch(),
       code_execution: xai.tools.codeExecution(),
@@ -130,6 +131,14 @@ app.post("/api/chat", async (req, res) => {
         );
       } catch (e) {
         console.error("persist failed", e);
+      }
+      // The prompt asks for set_layout every building turn; enforce when skipped.
+      if (turn.mutated && !turn.laidOut) {
+        try {
+          await normalizeRows(canvasId);
+        } catch (e) {
+          console.error("normalize failed", e);
+        }
       }
       notify(canvasId);
     },

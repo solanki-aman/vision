@@ -26,8 +26,14 @@ const titled = {
   size,
 };
 
-export function buildTools(canvasId: string, onChange: () => void) {
+export interface TurnFlags {
+  mutated: boolean;
+  laidOut: boolean;
+}
+
+export function buildTools(canvasId: string, onChange: () => void, turn?: TurnFlags) {
   const place = async (op: Operation) => {
+    if (turn && op.kind === "add_widget") turn.mutated = true;
     const result = await applyChangeSet(canvasId, [op], "agent");
     onChange();
     if (result.errors.length) return { ok: false, errors: result.errors };
@@ -181,6 +187,7 @@ export function buildTools(canvasId: string, onChange: () => void) {
           .max(12),
       }),
       execute: async ({ rows }) => {
+        if (turn) turn.laidOut = true;
         const result = await applyLayout(canvasId, rows);
         onChange();
         return result;
@@ -211,6 +218,7 @@ export function buildTools(canvasId: string, onChange: () => void) {
           .max(6),
       }),
       execute: async ({ lanes }) => {
+        if (turn) turn.laidOut = true;
         const result = await applyLanes(canvasId, lanes);
         onChange();
         return result;

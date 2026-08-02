@@ -92,7 +92,7 @@ function wash(hex: string, mode: "light" | "dark") {
 }
 
 /** Typed spec in, renderer options out. The model never supplies ECharts config. */
-export function specToOption(spec: ChartSpec, theme: ChartTheme, animate = true): EChartsOption {
+export function specToOption(spec: ChartSpec, theme: ChartTheme, animate = true, entities?: Record<string, string>): EChartsOption {
   const t = spec.chartType;
   const SERIES = theme.series;
   const SEQUENTIAL = theme.sequential;
@@ -260,22 +260,26 @@ export function specToOption(spec: ChartSpec, theme: ChartTheme, animate = true)
           { ...catAxis, data: cats, boundaryGap: false },
           { ...valAxis, name: spec.yAxis?.label },
         ),
-        series: series.map((s, i) => ({
-          type: "line",
-          name: s.name,
-          data: s.data,
-          step: t === "step_line" ? "middle" : undefined,
-          stack: t === "stacked_area" ? "total" : undefined,
-          symbolSize: 6,
-          showSymbol: s.data.length <= 20,
-          lineStyle: { width: 2 },
-          emphasis: { focus: "series" },
-          areaStyle:
-            t === "area" || t === "stacked_area"
-              ? { opacity: t === "stacked_area" ? 0.75 : 0.22, color: fill(i) }
-              : undefined,
-          ...(i === 0 ? anno : {}),
-        })) as any,
+        series: series.map((s, i) => {
+          const ec = entities?.[s.name];
+          return {
+            type: "line",
+            name: s.name,
+            data: s.data,
+            step: t === "step_line" ? "middle" : undefined,
+            stack: t === "stacked_area" ? "total" : undefined,
+            symbolSize: 6,
+            showSymbol: s.data.length <= 20,
+            itemStyle: ec ? { color: ec } : undefined,
+            lineStyle: { width: 2, ...(ec ? { color: ec } : {}) },
+            emphasis: { focus: "series" },
+            areaStyle:
+              t === "area" || t === "stacked_area"
+                ? { opacity: t === "stacked_area" ? 0.75 : 0.22, color: ec ?? fill(i) }
+                : undefined,
+            ...(i === 0 ? anno : {}),
+          };
+        }) as any,
       };
 
     case "bar":
@@ -285,9 +289,18 @@ export function specToOption(spec: ChartSpec, theme: ChartTheme, animate = true)
         series: series.map((s, i) => ({
           type: "bar",
           name: s.name,
-          data: s.data,
+          data:
+            series.length === 1 && entities
+              ? s.data.map((v, j) => ({
+                  value: v,
+                  itemStyle: entities[cats[j]] ? { color: entities[cats[j]] } : undefined,
+                }))
+              : s.data,
           stack: t === "stacked_bar" ? "total" : undefined,
-          itemStyle: { color: fill(i), borderRadius: t === "stacked_bar" ? 2 : [4, 4, 0, 0] },
+          itemStyle: {
+            color: entities?.[s.name] ?? fill(i),
+            borderRadius: t === "stacked_bar" ? 2 : [4, 4, 0, 0],
+          },
           barMaxWidth: 44,
           emphasis: { focus: "series" },
           ...(i === 0 ? anno : {}),
@@ -304,9 +317,15 @@ export function specToOption(spec: ChartSpec, theme: ChartTheme, animate = true)
         series: series.map((s, i) => ({
           type: "bar",
           name: s.name,
-          data: [...s.data].reverse(),
+          data:
+            series.length === 1 && entities
+              ? [...s.data].reverse().map((v, j) => {
+                  const cat = [...cats].reverse()[j];
+                  return { value: v, itemStyle: entities[cat] ? { color: entities[cat] } : undefined };
+                })
+              : [...s.data].reverse(),
           stack: t === "stacked_horizontal_bar" ? "total" : undefined,
-          itemStyle: { color: fill(i), borderRadius: t === "stacked_horizontal_bar" ? 2 : [0, 4, 4, 0] },
+          itemStyle: { color: entities?.[s.name] ?? fill(i), borderRadius: t === "stacked_horizontal_bar" ? 2 : [0, 4, 4, 0] },
           barMaxWidth: 26,
           emphasis: { focus: "series" },
         })) as any,
@@ -398,7 +417,7 @@ export function specToOption(spec: ChartSpec, theme: ChartTheme, animate = true)
           data: s.data.slice(0, 2),
           symbolSize: 8,
           lineStyle: { width: 2 },
-          itemStyle: { color: SERIES[i % SERIES.length] },
+          itemStyle: { color: entities?.[s.name] ?? SERIES[i % SERIES.length] },
           endLabel: {
             show: true,
             color: INK.secondary,
@@ -543,7 +562,11 @@ export function specToOption(spec: ChartSpec, theme: ChartTheme, animate = true)
             labelLine: { lineStyle: { color: INK.axis }, length: 6, length2: 8 },
             labelLayout: { hideOverlap: true },
             emphasis: { scaleSize: 6 },
-            data: cats.map((c, i) => ({ name: c, value: s.data[i] ?? 0 })),
+            data: cats.map((c, i) => ({
+              name: c,
+              value: s.data[i] ?? 0,
+              ...(entities?.[c] ? { itemStyle: { color: entities[c], borderColor: INK.surface, borderWidth: 2, borderRadius: 3 } } : {}),
+            })),
           },
         ] as any,
       };

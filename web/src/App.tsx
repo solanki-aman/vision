@@ -6,6 +6,7 @@ import { Canvas } from "./Canvas";
 import { StreamRail } from "./StreamRail";
 import { Settings } from "./Settings";
 import { useTheme } from "./ThemeContext";
+import { buildEntityColors } from "./entities";
 import { FilterProvider } from "./FilterContext";
 import type { CanvasState, CanvasStyle } from "./types";
 
@@ -25,6 +26,7 @@ const PROMPTS = [
 
 function CanvasView({ canvasId, onTitle }: { canvasId: string; onTitle: (t: string) => void }) {
   const [state, setState] = useState<CanvasState>({ canvas: null, widgets: [] });
+  const { chart: chartTheme } = useTheme();
   const [railOpen, setRailOpen] = useState(true);
   const [input, setInput] = useState("");
   const [initial, setInitial] = useState<UIMessage[] | null>(null);
@@ -148,6 +150,12 @@ function CanvasView({ canvasId, onTitle }: { canvasId: string; onTitle: (t: stri
     return () => window.removeEventListener("keydown", onKey);
   }, [present, step, goto, exitPresent]);
 
+  // Recurring entities (tickers, teams, products) keep one colour everywhere.
+  const entities = useMemo(
+    () => buildEntityColors(state.widgets, chartTheme.series),
+    [state.widgets, chartTheme.series],
+  );
+
   // Per-canvas identity chosen by the agent: accent, display voice, paper, card treatment.
   const style: CanvasStyle | null = state.canvas?.style ?? null;
   const DISPLAY: Record<string, string> = {
@@ -195,6 +203,7 @@ function CanvasView({ canvasId, onTitle }: { canvasId: string; onTitle: (t: stri
         )}
         <Canvas
           widgets={state.widgets}
+          entities={entities}
           revealY={revealY}
           onLayoutChange={applyOps}
           onRemove={(widgetId) => applyOps([{ kind: "remove_widget", widgetId }])}
