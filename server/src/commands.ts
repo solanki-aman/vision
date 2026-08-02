@@ -16,34 +16,39 @@ export interface ApplyResult {
 }
 
 const GRID_COLS = 12;
+
+/** Row heights in grid units. One unit is 40px, so a kpi band is 120px. */
+export const HEIGHTS = { kpi: 3, short: 5, standard: 8, tall: 11 } as const;
+export type HeightName = keyof typeof HEIGHTS;
+
 const DEFAULT_SIZE: Record<WidgetKind, { w: number; h: number }> = {
-  chart: { w: 6, h: 5 },
-  kpi: { w: 3, h: 3 },
-  table: { w: 6, h: 5 },
-  narrative: { w: 4, h: 4 },
-  image: { w: 4, h: 5 },
+  chart: { w: 6, h: HEIGHTS.standard },
+  kpi: { w: 3, h: HEIGHTS.kpi },
+  table: { w: 6, h: HEIGHTS.standard },
+  narrative: { w: 4, h: HEIGHTS.standard },
+  image: { w: 4, h: HEIGHTS.standard },
 };
 
-// Some forms need room to breathe; others read fine small.
+// Forms that need width or breathing room when the agent does not say.
 const CHART_SIZE: Record<string, { w: number; h: number }> = {
-  gauge: { w: 3, h: 4 },
-  pie: { w: 4, h: 5 },
-  donut: { w: 4, h: 5 },
-  rose: { w: 4, h: 5 },
-  funnel: { w: 4, h: 5 },
-  radar: { w: 4, h: 5 },
-  sunburst: { w: 5, h: 6 },
-  treemap: { w: 6, h: 5 },
-  tree: { w: 6, h: 5 },
-  sankey: { w: 8, h: 6 },
-  chord: { w: 5, h: 6 },
-  graph: { w: 5, h: 6 },
-  calendar: { w: 12, h: 4 },
-  heatmap: { w: 7, h: 5 },
-  parallel: { w: 8, h: 5 },
-  theme_river: { w: 8, h: 5 },
-  candlestick: { w: 8, h: 5 },
-  boxplot: { w: 6, h: 5 },
+  gauge: { w: 3, h: HEIGHTS.short },
+  pie: { w: 4, h: HEIGHTS.standard },
+  donut: { w: 4, h: HEIGHTS.standard },
+  rose: { w: 4, h: HEIGHTS.standard },
+  funnel: { w: 4, h: HEIGHTS.standard },
+  radar: { w: 4, h: HEIGHTS.standard },
+  sunburst: { w: 5, h: HEIGHTS.tall },
+  treemap: { w: 6, h: HEIGHTS.standard },
+  tree: { w: 6, h: HEIGHTS.standard },
+  sankey: { w: 8, h: HEIGHTS.tall },
+  chord: { w: 5, h: HEIGHTS.tall },
+  graph: { w: 5, h: HEIGHTS.tall },
+  calendar: { w: 12, h: HEIGHTS.short },
+  heatmap: { w: 7, h: HEIGHTS.standard },
+  parallel: { w: 8, h: HEIGHTS.standard },
+  theme_river: { w: 8, h: HEIGHTS.standard },
+  candlestick: { w: 8, h: HEIGHTS.standard },
+  boxplot: { w: 6, h: HEIGHTS.standard },
 };
 
 function sizeFor(kind: WidgetKind, spec: unknown) {
@@ -52,6 +57,81 @@ function sizeFor(kind: WidgetKind, spec: unknown) {
     if (type && CHART_SIZE[type]) return CHART_SIZE[type];
   }
   return DEFAULT_SIZE[kind];
+}
+
+export interface LayoutRow {
+  height: HeightName;
+  items: { widgetId: string; span: number }[];
+}
+
+/**
+ * Row-based layout: every card in a row shares one height and the spans are
+ * normalised to fill 12 columns. This is what makes a canvas read as a
+ * dashboard rather than a pile of boxes.
+ */
+export async function applyLayout(canvasId: string, rows: LayoutRow[]) {
+  const { rows: existing } = await pool.query(
+    `SELECT widget_id FROM canvas.placements WHERE canvas_id = $1`,
+    [canvasId],
+  );
+  const known = new Set(existing.map((r) => r.widget_id));
+  const seen = new Set<string>();
+  const errors: string[] = [];
+  let y = 0;
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    for (const row of rows) {
+      const items = row.items.filter((i) => {
+        if (!known.has(i.widgetId)) {
+          errors.push(`unknown widget ${i.widgetId}`);
+          return false;
+        }
+        if (seen.has(i.widgetId)) return false;
+        return true;
+      });
+      if (!items.length) continue;
+
+      const h = HEIGHTS[row.height] ?? HEIGHTS.standard;
+      const total = items.reduce((a, i) => a + Math.max(1, i.span), 0);
+      let x = 0;
+      for (const [idx, item] of items.entries()) {
+        // Scale the row to exactly 12 columns, giving any remainder to the last card.
+        const raw = Math.max(1, item.span);
+        let w = Math.max(2, Math.round((raw / total) * GRID_COLS));
+        if (idx === items.length - 1) w = Math.max(2, GRID_COLS - x);
+        w = Math.min(w, GRID_COLS - x);
+        if (w <= 0) continue;
+        seen.add(item.widgetId);
+        await client.query(
+          `UPDATE canvas.placements SET x = $2, y = $3, w = $4, h = $5 WHERE widget_id = $1`,
+          [item.widgetId, x, y, w, h],
+        );
+        x += w;
+      }
+      y += h;
+    }
+
+    // Anything the agent left out keeps its size and stacks below.
+    for (const id of known) {
+      if (seen.has(id)) continue;
+      await client.query(`UPDATE canvas.placements SET x = 0, y = $2 WHERE widget_id = $1`, [id, y]);
+      y += HEIGHTS.standard;
+    }
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+
+  await audit("apply_layout", errors.length ? "partial" : "applied", "canvas", canvasId, {
+    rows: rows.length,
+    errors,
+  });
+  return { rows: rows.length, placed: seen.size, errors };
 }
 
 /** Next free row-major slot in a 12-col grid — placements are server-generated (plan §2.10). */

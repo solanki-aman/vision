@@ -1,16 +1,23 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { chartSpec, kpiSpec, tableSpec, narrativeSpec, provenance } from "./specs.js";
-import { applyChangeSet, compact, type Operation } from "./commands.js";
+import { applyChangeSet, applyLayout, type Operation } from "./commands.js";
 import { generateImage } from "./imagine.js";
+
+const HEIGHT_ROWS = { kpi: 3, short: 5, standard: 8, tall: 11 } as const;
 
 const size = z
   .object({
-    w: z.number().int().min(2).max(12).describe("Width in columns of a 12-column grid."),
-    h: z.number().int().min(2).max(9).describe("Height in rows; each row is about 76px."),
+    span: z.number().int().min(2).max(12).describe("Width in columns of a 12-column row."),
+    height: z
+      .enum(["kpi", "short", "standard", "tall"])
+      .describe("kpi=120px metric tile, short=200px, standard=320px chart, tall=440px."),
   })
   .optional()
-  .describe("You own the layout. Omit only when the default size is genuinely right.");
+  .describe("Omit only when the default size is genuinely right; prefer set_layout at the end.");
+
+const toSize = (s?: { span: number; height: keyof typeof HEIGHT_ROWS }) =>
+  s ? { w: s.span, h: HEIGHT_ROWS[s.height] } : undefined;
 
 const titled = {
   title: z.string().describe("A title that states the finding, not the topic."),
@@ -32,7 +39,7 @@ export function buildTools(canvasId: string, onChange: () => void) {
         "Place a chart on the canvas. Your primary tool — reach for it first.",
       inputSchema: z.object({ ...titled, spec: chartSpec }),
       execute: async ({ title, spec, provenance, size }) =>
-        place({ kind: "add_widget", widgetKind: "chart", title, spec, provenance, size }),
+        place({ kind: "add_widget", widgetKind: "chart", title, spec, provenance, size: toSize(size) }),
     }),
 
     add_kpi: tool({
@@ -40,14 +47,14 @@ export function buildTools(canvasId: string, onChange: () => void) {
         "Place a single decisive number with an optional comparison and sparkline. Use for headline metrics instead of stating them in text.",
       inputSchema: z.object({ ...titled, spec: kpiSpec }),
       execute: async ({ title, spec, provenance, size }) =>
-        place({ kind: "add_widget", widgetKind: "kpi", title, spec, provenance, size }),
+        place({ kind: "add_widget", widgetKind: "kpi", title, spec, provenance, size: toSize(size) }),
     }),
 
     add_table: tool({
       description: "Place an exact-values table. Use when precision matters more than shape.",
       inputSchema: z.object({ ...titled, spec: tableSpec }),
       execute: async ({ title, spec, provenance, size }) =>
-        place({ kind: "add_widget", widgetKind: "table", title, spec, provenance, size }),
+        place({ kind: "add_widget", widgetKind: "table", title, spec, provenance, size: toSize(size) }),
     }),
 
     add_narrative: tool({
@@ -55,7 +62,7 @@ export function buildTools(canvasId: string, onChange: () => void) {
         "Place a short annotation card — the 'so what', a caveat, or a recommendation. This is where prose belongs.",
       inputSchema: z.object({ ...titled, spec: narrativeSpec }),
       execute: async ({ title, spec, provenance, size }) =>
-        place({ kind: "add_widget", widgetKind: "narrative", title, spec, provenance, size }),
+        place({ kind: "add_widget", widgetKind: "narrative", title, spec, provenance, size: toSize(size) }),
     }),
 
     generate_image: tool({
@@ -75,7 +82,7 @@ export function buildTools(canvasId: string, onChange: () => void) {
           title,
           spec: { url, prompt },
           provenance: { source: "Grok Imagine", confidence: "illustrative" },
-          size,
+          size: toSize(size),
         });
       },
     }),
@@ -92,31 +99,40 @@ export function buildTools(canvasId: string, onChange: () => void) {
         place({ kind: "update_widget", widgetId, title, spec }),
     }),
 
-    arrange_canvas: tool({
+    set_layout: tool({
       description:
-        "Reposition and resize widgets already on the canvas. Use this to compose a deliberate layout — a KPI row across the top, charts beneath, notes to the side.",
+        "Arrange the whole canvas as a dashboard. Pass an ordered list of rows; every card in a row shares one height and the spans are fitted to exactly 12 columns. Call this once, last, after all widgets exist. This is how a canvas stops looking like a pile of boxes.",
       inputSchema: z.object({
-        placements: z
+        rows: z
           .array(
             z.object({
-              widgetId: z.string(),
-              x: z.number().int().min(0).max(11).describe("Left column, 0-11."),
-              y: z.number().int().min(0).describe("Row from the top, 0 is the first row."),
-              w: z.number().int().min(2).max(12),
-              h: z.number().int().min(2).max(9),
+              height: z
+                .enum(["kpi", "short", "standard", "tall"])
+                .describe("kpi for a metric strip, standard for most chart rows, tall for dense forms."),
+              items: z
+                .array(
+                  z.object({
+                    widgetId: z.string(),
+                    span: z
+                      .number()
+                      .int()
+                      .min(2)
+                      .max(12)
+                      .describe("Relative width. Spans in a row should sum to 12."),
+                  }),
+                )
+                .min(1)
+                .max(4)
+                .describe("At most four cards per row, in left-to-right order."),
             }),
           )
-          .max(24),
+          .min(1)
+          .max(12),
       }),
-      execute: async ({ placements }) => {
-        const ops: Operation[] = placements.flatMap((p) => [
-          { kind: "resize_widget" as const, widgetId: p.widgetId, w: p.w, h: p.h },
-          { kind: "move_widget" as const, widgetId: p.widgetId, x: p.x, y: p.y },
-        ]);
-        const result = await applyChangeSet(canvasId, ops, "agent");
-        await compact(canvasId);
+      execute: async ({ rows }) => {
+        const result = await applyLayout(canvasId, rows);
         onChange();
-        return { ok: result.errors.length === 0, errors: result.errors, moved: placements.length };
+        return result;
       },
     }),
 

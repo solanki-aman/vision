@@ -49,8 +49,8 @@ export function Canvas({ widgets, onLayoutChange, onRemove }: Props) {
     const g = GridStack.init(
       {
         column: FULL_COLUMNS,
-        cellHeight: 76,
-        margin: 7,
+        cellHeight: 40,
+        margin: 8,
         float: false,
         animate: true,
         resizable: { handles: "se, sw" },
