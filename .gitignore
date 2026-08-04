@@ -222,5 +222,5 @@ node_modules/
 web/dist/
 *.tsbuildinfo
 
-# screenshots are regenerated on demand
-screenshots/
+# Screenshots that back the README are committed; intermediate recordings are not.
+screenshots/*.webm

@@ -31,12 +31,6 @@ export interface ImageSpec {
   prompt: string;
 }
 
-export interface ControlSpec {
-  control: "range";
-  label: string;
-  targets: string[];
-}
-
 export interface LabelSpec {
   text: string;
   note?: string;
@@ -61,9 +55,9 @@ export interface HeroSpec {
 
 export interface Widget {
   id: string;
-  kind: "chart" | "kpi" | "table" | "narrative" | "image" | "control" | "label" | "statement" | "hero";
+  kind: "chart" | "kpi" | "table" | "narrative" | "image" | "label" | "statement" | "hero";
   title: string;
-  spec: ChartSpec | KpiSpec | TableSpec | NarrativeSpec | ImageSpec | ControlSpec | LabelSpec | StatementSpec | HeroSpec;
+  spec: ChartSpec | KpiSpec | TableSpec | NarrativeSpec | ImageSpec | LabelSpec | StatementSpec | HeroSpec;
   provenance: Provenance | null;
   x: number;
   y: number;

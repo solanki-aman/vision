@@ -922,5 +922,6 @@ export function specToOption(spec: ChartSpec, theme: ChartTheme, animate = true,
         ] as any,
       };
     }
+
   }
 }

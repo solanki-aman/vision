@@ -95,6 +95,7 @@ function CanvasView({ canvasId, onTitle }: { canvasId: string; onTitle: (t: stri
   );
 
   const empty = state.widgets.length === 0;
+  const bare = new URLSearchParams(location.search).get("bare") === "1";
 
   // Presentation mode: the canvas plays row by row.
   const [present, setPresent] = useState(false);
@@ -177,7 +178,7 @@ function CanvasView({ canvasId, onTitle }: { canvasId: string; onTitle: (t: stri
   return (
     <FilterProvider>
     <div
-      className={`stage ${present ? "presenting" : railOpen ? "" : "wide"}`}
+      className={`stage ${present ? "presenting" : bare ? "bare" : railOpen ? "" : "wide"}`}
       data-cards={style?.cards ?? "bordered"}
       style={styleVars}
     >
@@ -196,7 +197,7 @@ function CanvasView({ canvasId, onTitle }: { canvasId: string; onTitle: (t: stri
             </div>
           </div>
         )}
-        {!empty && !present && (
+        {!empty && !present && !bare && (
           <button className="present-launch" title="Present this canvas" onClick={enterPresent}>
             ▶ present
           </button>
@@ -215,7 +216,7 @@ function CanvasView({ canvasId, onTitle }: { canvasId: string; onTitle: (t: stri
         )}
       </div>
 
-      {!present && (
+      {!present && !bare && (
         <StreamRail messages={messages} busy={busy} open={railOpen} onToggle={() => setRailOpen((v) => !v)} />
       )}
 
@@ -236,7 +237,7 @@ function CanvasView({ canvasId, onTitle }: { canvasId: string; onTitle: (t: stri
         </div>
       )}
 
-      <div className="dock">
+      <div className="dock" hidden={bare}>
         {error && <div className="dock-error">{error.message}</div>}
         <form
           className={`bar ${busy ? "busy" : ""}`}
@@ -306,6 +307,15 @@ export default function App() {
   useEffect(() => {
     if (booted.current) return;
     booted.current = true;
+    const deep = new URLSearchParams(location.search).get("canvas");
+    if (deep) {
+      setActive(deep);
+      fetch(`/api/canvases/${deep}`)
+        .then((r) => r.json())
+        .then((d) => d?.canvas?.title && setTitle(d.canvas.title))
+        .catch(() => {});
+      return;
+    }
     fetch("/api/canvases")
       .then((r) => r.json())
       .then((list: CanvasListItem[]) => {

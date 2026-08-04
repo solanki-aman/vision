@@ -3,7 +3,7 @@ import * as echarts from "echarts";
 import { specToOption, type ChartSpec } from "../chartAdapter";
 import { STATUS } from "../theme";
 import { useTheme } from "../ThemeContext";
-import type { KpiSpec, TableSpec, NarrativeSpec, ImageSpec, ControlSpec, LabelSpec, StatementSpec, HeroSpec, Widget } from "../types";
+import type { KpiSpec, TableSpec, NarrativeSpec, ImageSpec, LabelSpec, StatementSpec, HeroSpec, Widget } from "../types";
 import { useFilters, applyWindow } from "../FilterContext";
 import { matchEntity } from "../entities";
 
@@ -164,37 +164,6 @@ function Img({ spec }: { spec: ImageSpec }) {
   return <img className="gen-image" src={spec.url} alt={spec.prompt} loading="lazy" />;
 }
 
-function RangeControl({ spec }: { spec: ControlSpec }) {
-  const { windows, setWindow } = useFilters();
-  const current = windows[spec.targets[0]] ?? [0, 100];
-  const [lo, hi] = current;
-
-  const move = (which: 0 | 1) => (e: React.ChangeEvent<HTMLInputElement>) => {
-    const v = Number(e.target.value);
-    const next: [number, number] = which === 0 ? [Math.min(v, hi - 5), hi] : [lo, Math.max(v, lo + 5)];
-    setWindow(spec.targets, next);
-  };
-
-  return (
-    <div className="range">
-      <div className="range-head">
-        <span className="range-label">{spec.label}</span>
-        <span className="range-value">
-          {Math.round(lo)}% – {Math.round(hi)}%
-          <button className="range-reset" onClick={() => setWindow(spec.targets, [0, 100])}>
-            reset
-          </button>
-        </span>
-      </div>
-      <div className="range-track">
-        <span className="range-fill" style={{ left: `${lo}%`, right: `${100 - hi}%` }} />
-        <input type="range" min={0} max={100} value={lo} onChange={move(0)} aria-label={`${spec.label} start`} />
-        <input type="range" min={0} max={100} value={hi} onChange={move(1)} aria-label={`${spec.label} end`} />
-      </div>
-    </div>
-  );
-}
-
 function Label({ spec }: { spec: LabelSpec }) {
   return (
     <div className="labelband">
@@ -235,12 +204,18 @@ function Hero({ spec }: { spec: HeroSpec }) {
   );
 }
 
-export function WidgetBody({ widget, entities }: { widget: Widget; entities: Record<string, string> }) {
+export function WidgetBody({
+  widget,
+  entities,
+  allWidgets,
+}: {
+  widget: Widget;
+  entities: Record<string, string>;
+  allWidgets?: Widget[];
+}) {
   switch (widget.kind) {
     case "chart":
       return <Chart spec={widget.spec as ChartSpec} widgetId={widget.id} entities={entities} />;
-    case "control":
-      return <RangeControl spec={widget.spec as ControlSpec} />;
     case "label":
       return <Label spec={widget.spec as LabelSpec} />;
     case "statement":
