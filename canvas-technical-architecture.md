@@ -26,6 +26,7 @@ The implementation is based on these fixed product decisions:
 - WCAG 2.2 AA is an acceptance criterion.
 - The always-on Canvas Summary is capped near 1,000 tokens.
 - Organization themes and palettes are governed; user overrides are limited.
+- Backend services are written in Python with FastAPI; the agent runtime is LangGraph and the model provider is xAI Grok through the official `xai-sdk` Python SDK. See §7.8 and §7.9.
 
 ## 2. Architectural principles and boundaries
 
@@ -47,9 +48,11 @@ The implementation is based on these fixed product decisions:
 ```mermaid
 flowchart LR
     User["CFO or FP&A user"] --> React["React application"]
-    React -->|"artifact CRUD, commands, mentions"| CanvasAPI["Canvas API and command service"]
-    React -->|"conversation and agent runs"| AgentAPI["LangGraph agent API"]
-    React -->|"validated query and render requests"| RenderAPI["Render and query API"]
+    React -->|"artifact CRUD, commands, mentions"| CanvasAPI["canvas-api: FastAPI command service"]
+    React -->|"conversation and agent runs"| AgentAPI["agent-api: FastAPI + LangGraph"]
+    React -->|"validated query and render requests"| RenderAPI["render-api: FastAPI query and render"]
+
+    AgentAPI -->|"streaming chat, tools, structured proposals"| Grok["xAI Grok via xai-sdk"]
 
     AgentAPI -->|"read summary and detail"| CanvasAPI
     AgentAPI -->|"submit typed proposal"| CanvasAPI
@@ -80,6 +83,7 @@ Boundary rules:
 - The render/query API owns data-reference execution, schema validation, transformations, renderer adaptation, and ephemeral result caching.
 - Authorization and entitlements are called both before metadata disclosure and before data execution.
 - Conversation/LangGraph state and Canvas metadata may share a PostgreSQL cluster, but use separate schemas, roles, migrations, and access paths.
+- Only `agent-api` holds xAI credentials, and it reaches Canvas and render services over the same authenticated `/v1` API the browser uses.
 
 ### 3.2 Generate a dashboard or widget
 
@@ -409,22 +413,46 @@ All endpoints are under `/v1`, require an authenticated identity, propagate `req
 
 ### 7.1 API groups
 
+- **Conversation and agent-run APIs:** start, observe, interrupt, resume, and cancel asynchronous agent runs. This is the only path from the browser to the model.
 - **Artifact APIs:** deterministic Canvas/dashboard/widget reads and lifecycle operations.
 - **Agent proposal APIs:** draft and validate proposals; never bypass command application.
 - **Command APIs:** validate, approve, apply, undo, and redo typed change sets.
 - **Render/query APIs:** entitlement-aware data execution, previews, exports, lineage, and freshness.
+- **Job APIs:** one status/progress/cancel envelope shared by query, render, export, and refresh work.
 - **Administration APIs:** templates, connectors, themes, palettes, calendars, quotas, and policies.
 
 ### 7.2 Endpoint inventory
 
 ```text
+Platform APIs
+  GET    /session                             # actor, organization, entitlement fingerprint
+  GET    /healthz                             # liveness
+  GET    /readyz                              # database, cache, model provider reachability
+  GET    /version                             # build, schema version, command-registry version
+
+Conversation and agent-run APIs
+  POST   /conversations
+  GET    /conversations?canvasId=&cursor=
+  GET    /conversations/{conversationId}
+  GET    /conversations/{conversationId}/messages?cursor=
+  POST   /conversations/{conversationId}/runs # start an asynchronous agent run
+  GET    /runs/{runId}
+  GET    /runs/{runId}/events                 # SSE: preamble, node progress, partial artifacts
+  POST   /runs/{runId}:resume                 # answer a disambiguation or confirmation interrupt
+  POST   /runs/{runId}:cancel
+  GET    /runs/{runId}/trace                  # bounded node/telemetry view for provenance UI
+
 Artifact APIs
   POST   /canvases
+  GET    /canvases?scope=&cursor=             # owned, shared-with-me, recently viewed
   GET    /canvases/{canvasId}
   PATCH  /canvases/{canvasId}                 # lifecycle metadata only
   DELETE /canvases/{canvasId}                 # soft delete
+  POST   /canvases/{canvasId}:restore         # undelete inside the 30-day trash window
+  POST   /canvases/{canvasId}:duplicate
   GET    /canvases/{canvasId}/versions
   GET    /canvases/{canvasId}/versions/{n}
+  POST   /canvases/{canvasId}/versions/{n}:restore
   GET    /canvases/{canvasId}/summary
   POST   /canvas-details:batchGet
   GET    /widgets/{widgetId}
@@ -440,10 +468,13 @@ Template APIs
 
 Agent proposal APIs
   POST   /agent/proposals
+  GET    /agent/proposals/{proposalId}
   POST   /agent/proposals/{proposalId}:preview
 
 Command APIs
   POST   /change-sets:validate
+  GET    /change-sets/{changeSetId}           # status, risk, warnings, approval state
+  GET    /canvases/{canvasId}/change-sets     # applied history, newest first
   POST   /change-sets/{changeSetId}:approve
   POST   /change-sets/{changeSetId}:apply
   POST   /change-sets/{changeSetId}:reject
@@ -463,10 +494,22 @@ Home and scheduling APIs
   DELETE /pins/{pinId}/schedule
   POST   /pins/{pinId}:refresh
 
-Sharing APIs
+Sharing and snapshot APIs
   GET    /canvases/{canvasId}/shares
   POST   /canvases/{canvasId}/shares
   DELETE /canvases/{canvasId}/shares/{grantId}
+  POST   /canvases/{canvasId}/snapshots       # policy-controlled static object
+  GET    /snapshots/{snapshotId}
+  DELETE /snapshots/{snapshotId}
+
+Saved view and scenario APIs
+  GET    /canvases/{canvasId}/saved-views
+  POST   /canvases/{canvasId}/saved-views
+  DELETE /saved-views/{savedViewId}
+  GET    /canvases/{canvasId}/scenarios
+  POST   /canvases/{canvasId}/scenarios       # Canvas-owned assumptions; never source writeback
+  PATCH  /scenarios/{scenarioId}
+  DELETE /scenarios/{scenarioId}
 
 Render and query APIs
   POST   /data-references:validate
@@ -478,6 +521,15 @@ Render and query APIs
   GET    /exports/{exportId}
   GET    /widgets/{widgetId}/lineage
   GET    /widgets/{widgetId}/freshness
+
+Job APIs (uniform envelope for query, render, export, and refresh jobs)
+  GET    /jobs/{jobId}
+  GET    /jobs/{jobId}/events                 # SSE progress stream
+  POST   /jobs/{jobId}:cancel
+
+Notification APIs
+  GET    /notifications?unreadOnly=&cursor=   # refresh outcomes, schedule pauses, share grants
+  POST   /notifications/{notificationId}:acknowledge
 
 Admin APIs
   POST   /admin/templates
@@ -513,7 +565,7 @@ POST /v1/mentions/resolve
       {"entityId": "widget_7", "title": "Revenue Trend", "location": "FY27 Plan / Revenue"},
       {"entityId": "widget_9", "title": "Revenue Trend", "location": "Board Pack / Overview"}
     ]
-  ]
+  }]
 }
 ```
 
@@ -571,6 +623,108 @@ The approval endpoint returns a one-use token bound to the actor, change-set has
 ```
 
 Server-Sent Events are sufficient for MVP progress streaming. WebSockets are not required without live co-editing.
+
+Every asynchronous surface — query, render, export, scheduled refresh — returns this envelope and is readable through the uniform `GET /jobs/{jobId}` and `GET /jobs/{jobId}/events` endpoints in addition to its type-specific path.
+
+### 7.6 Agent-run contract
+
+An agent run is the only way the React application reaches the LangGraph service. `POST /conversations/{conversationId}/runs` accepts the user turn and returns immediately:
+
+```json
+{
+  "runId": "run_1",
+  "conversationId": "conv_1",
+  "canvasId": "canvas_1",
+  "status": "running",
+  "preamble": "Pulling FY27 revenue actuals against plan.",
+  "links": {"events": "/v1/runs/run_1/events"}
+}
+```
+
+`GET /runs/{runId}/events` streams typed SSE events. The event name is the SSE `event:` field; the payload is JSON.
+
+| Event | Payload | Purpose |
+|---|---|---|
+| `run.preamble` | text | Fast acknowledgement inside the 2-second SLO |
+| `run.node` | node name, status, elapsed | Progress from the LangGraph node sequence |
+| `run.token` | text delta | Narrative streaming for the conversation rail |
+| `run.tool` | tool name, arguments digest, status | Server-side and client-side tool activity |
+| `run.partial` | artifact reference | Progressive widget draft available for preview |
+| `run.interrupt` | kind, prompt, options, expiry | `ambiguous_reference` or `confirmation_required` |
+| `run.change_set` | change-set ID, status, risk level | Proposal reached the command layer |
+| `run.usage` | tokens, cost, citations | Provenance and budget disclosure |
+| `run.error` | typed failure code | One of the §5.2 failure types |
+| `run.done` | terminal status | Stream end |
+
+A run that emits `run.interrupt` parks its LangGraph checkpoint and waits. The client answers with `POST /runs/{runId}:resume`, carrying either the chosen mention candidate or the approval token obtained from `POST /change-sets/{changeSetId}:approve`. Resume is idempotent per `interruptId`; a second answer is rejected rather than replayed. Interrupts expire with the approval token, after which the run terminates as `cancelled` and the client must start a new run.
+
+Reconnection uses the standard SSE `Last-Event-ID` header. The run event log is persisted per run, so a dropped connection replays missed events rather than restarting work.
+
+### 7.7 API conventions
+
+- **Versioning:** the `/v1` prefix covers breaking changes only; additive fields ship without a version bump. Every response carries `schemaVersion`.
+- **Errors:** one envelope everywhere — `{"error": {"code", "message", "details", "requestId", "retryable"}}`. `code` is drawn from the §5.2 typed failure list plus transport-level codes, never a free-text string. HTTP status maps to the class of failure; the code carries the meaning.
+- **Pagination:** opaque cursors (`cursor`, `limit`, `nextCursor`). Offset pagination is not offered on entitlement-filtered collections, because filtered pages have unstable offsets.
+- **Idempotency:** all mutating `POST` requests accept `Idempotency-Key`. Change-set apply additionally binds to the change-set hash and base versions, so a replayed apply returns the original result instead of double-applying.
+- **Concurrency:** reads return `ETag`; writes that target artifacts require `If-Match` or explicit `baseVersions`, and mismatches return `version_conflict`.
+- **Colon verbs:** the `:action` suffix marks a non-CRUD command. Every such endpoint is a thin wrapper over a typed change set or job submission — none of them mutate storage directly, including `:restore` and `:duplicate`.
+- **Entitlements:** organization and actor come from the server-side session only. No endpoint accepts an organization, user, or role header from the client.
+- **Schema source of truth:** request and response models are Pydantic models; the OpenAPI document and the JSON Schemas required by §17 are generated from them, and the React client is generated from that OpenAPI document.
+
+### 7.8 Backend implementation stack
+
+The backend is Python. FastAPI serves every `/v1` surface described above.
+
+| Concern | Choice | Notes |
+|---|---|---|
+| Language | Python 3.12+ | Matches the LangGraph and xAI SDK ecosystems |
+| HTTP framework | FastAPI | Async-native, OpenAPI generation, dependency-injected auth and entitlement checks |
+| Validation and schemas | Pydantic v2 | Single definition of `DataReference`, `VisualizationSpec`, `ChangeSet`, and every operation payload |
+| Server | Uvicorn workers under Gunicorn | Long-lived SSE connections need generous keep-alive and worker timeouts |
+| Database access | SQLAlchemy 2.0 async + asyncpg | Separate engines and roles per schema (`canvas`, `conversation`, `audit`) |
+| Migrations | Alembic | One migration history per schema, matching §8.3 |
+| Agent runtime | LangGraph (Python) with the Postgres checkpointer | Interrupts persist across processes, which is what makes `:resume` work |
+| Model provider | `xai-sdk` (official xAI Python SDK) | See §7.9 |
+| Streaming | `sse-starlette` | Backs `/runs/{runId}/events` and `/jobs/{jobId}/events` |
+| Background work | Postgres `SKIP LOCKED` workers (A-02) run as a separate FastAPI-free process | Same domain packages, no HTTP surface |
+| Cache | Redis or Valkey via `redis.asyncio` (A-01) | Access-partitioned keys per §8.5 |
+| Observability | OpenTelemetry instrumentation plus `structlog` | Trace context propagates from HTTP through LangGraph nodes to model calls |
+| Testing and quality | pytest + pytest-asyncio, ruff, mypy strict, schemathesis against the generated OpenAPI | Contract tests run against the same schemas the client is generated from |
+
+Deployment splits into four Python services that share domain packages but not databases-by-convenience: `canvas-api` (artifact, command, mention, sharing, admin), `agent-api` (conversations, runs, LangGraph), `render-api` (data references, query/render/export jobs), and `worker` (schedules, refresh, retention). The boundary rules in §3.1 remain enforced by deployment, not merely by module layout: `agent-api` holds no database credentials for `canvas.*` and reaches the Canvas API over HTTP like any other client.
+
+### 7.9 Grok integration through the xAI Python SDK
+
+`agent-api` calls Grok through the official SDK's async client. Nothing else in the system talks to a model provider.
+
+```python
+from xai_sdk import AsyncClient
+from xai_sdk.chat import system, user
+from xai_sdk.tools import code_execution, web_search, x_search
+
+client = AsyncClient(api_key=settings.xai_api_key, timeout=3600)
+
+chat = client.chat.create(
+    model=settings.xai_model,                      # grok-4.5
+    tools=[web_search(), x_search(), code_execution()],
+    store_messages=False,                          # conversation state is ours, in Postgres
+)
+chat.append(system(canvas_system_prompt(summary)))
+chat.append(user(turn_text))
+
+async for response, chunk in chat.stream():
+    ...                                            # map chunks onto run.token / run.tool events
+```
+
+Integration rules:
+
+- **Structured proposals, not prose.** The change-set proposal is produced with `chat.parse(ChangeSetProposal)` against the Pydantic model that also defines the command API's request body, so a malformed proposal fails at the SDK boundary rather than inside the command layer.
+- **Streaming is mandatory.** Runs stream so tool activity is observable inside the run SLOs; `chunk.tool_calls` and `chunk.tool_outputs` become `run.tool` events.
+- **Server-side tools are read-only.** `web_search`, `x_search`, and `code_execution` execute on xAI infrastructure and may never be the source of a financial figure in MVP, where data references are restricted to internal governed sources. They are permitted for narrative context, and any widget derived from them is labelled accordingly under §12.1.
+- **Canvas mutation is a client-side tool.** The only mutating tool exposed to the model submits a proposal to the Canvas API; the model never receives credentials, connection strings, or raw source rows.
+- **No server-side retention.** `store_messages=False` keeps conversation state in `conversation.*` under our retention policy. `use_encrypted_content` is the alternative only if reasoning-trace continuity across turns proves necessary, and it requires a separate data-residency decision.
+- **Budgets are enforced before the call, not after.** The §11.2 token caps are applied when assembling the prompt; `response.usage` and `response.cost_usd` are recorded per run for the metrics in §12.3.
+- **Provider isolation.** All SDK access sits behind one internal `ModelGateway` interface so model choice, retries, and cost accounting stay in one module.
 
 ## 8. PostgreSQL, cache, and S3 design
 
@@ -1019,6 +1173,7 @@ Out of scope:
 
 ## 14. Dependency-ordered implementation backlog
 
+0. **Service skeleton:** FastAPI application factory, settings, session dependency, error envelope, generated OpenAPI and client, Alembic baselines, and the four-service split of §7.8.
 1. **Foundation:** IDs, schema versioning, organization context, policy interface, trace context, audit envelope.
 2. **Domain storage:** Canvas, Widget, DataReference, VisualizationSpec, placements, versions, change sets.
 3. **Command kernel:** Registry, JSON schemas, idempotency, validation, transactions, inverse operations, conflicts.
@@ -1076,6 +1231,8 @@ Approved during discovery:
 | D-15 | GridStack as primary layout engine | Approved |
 | D-16 | Every dashboard element exposes an independent linked Home pin | Approved |
 | D-17 | FP&A catalog includes cost-center variance matrices and driver-sensitivity tornado charts | Approved |
+| D-18 | Backend APIs are Python and FastAPI, with Pydantic v2 as the schema source of truth | Approved |
+| D-19 | xAI Grok via the official `xai-sdk` Python SDK is the model provider, behind one `ModelGateway` interface | Approved |
 
 Decisions requiring explicit approval before implementation:
 

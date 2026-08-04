@@ -22,15 +22,23 @@ services:
       XAI_API_KEY: ${XAI_API_KEY:-}
       XAI_MODEL: ${XAI_MODEL:-grok-4.5}
       PORT: 3001
-      # macOS bind mounts do not forward inotify events; poll instead.
-      CHOKIDAR_USEPOLLING: "true"
+      SHOOTER_URL: http://shooter:3002
     ports:
       - "3001:3001"
     depends_on:
       postgres:
         condition: service_healthy
     volumes:
-      - ./server/src:/app/src
+      - ./server/app:/app/app
+
+  shooter:
+    build: ./shooter
+    environment:
+      WEB_URL: http://web:5173
+    ports:
+      - "3002:3002"
+    depends_on:
+      - web
 
   web:
     build: ./web
