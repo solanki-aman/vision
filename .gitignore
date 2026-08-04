@@ -216,3 +216,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Node
+node_modules/
+web/dist/
+*.tsbuildinfo
+
+# Screenshots that back the README are committed; intermediate recordings are not.
+screenshots/*.webm
