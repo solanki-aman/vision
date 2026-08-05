@@ -334,6 +334,75 @@ async def apply_change_set(
                             {"kind": "add_chart_series", "widgetId": str(wid), "series": removed}
                         )
 
+                    elif kind == "set_chart_type":
+                        # Swap a chart's form while preserving its data, axes and
+                        # annotations — the "make that a bar chart" edit.
+                        try:
+                            wid = uid(op.get("widgetId"))
+                        except (ValueError, AttributeError, TypeError):
+                            errors.append(f'set_chart_type: {op.get("widgetId")} is not a widget id')
+                            continue
+                        prev = await _snapshot(conn, wid, change_set_id)
+                        if prev is None:
+                            errors.append(f'set_chart_type: {op.get("widgetId")} not found')
+                            continue
+                        if prev["kind"] != "chart":
+                            errors.append(f'set_chart_type: {op.get("widgetId")} is not a chart')
+                            continue
+                        prev_spec = dict(prev["spec"])
+                        prev_type = prev_spec.get("chartType")
+                        prev_spec["chartType"] = op.get("chartType")
+                        spec, error = validate_spec("chart", prev_spec)
+                        if error:
+                            errors.append(f"set_chart_type: {error}")
+                            continue
+                        await conn.execute(
+                            """UPDATE canvas.widgets
+                               SET spec = $2, current_version = current_version + 1, updated_at = now()
+                               WHERE id = $1""",
+                            wid, spec,
+                        )
+                        applied.append({"operation": op, "widgetId": str(wid)})
+                        inverse.append(
+                            {"kind": "set_chart_type", "widgetId": str(wid), "chartType": prev_type}
+                        )
+
+                    elif kind == "set_chart_annotations":
+                        # Replace a chart's on-plot marks, keeping the data intact.
+                        try:
+                            wid = uid(op.get("widgetId"))
+                        except (ValueError, AttributeError, TypeError):
+                            errors.append(f'set_chart_annotations: {op.get("widgetId")} is not a widget id')
+                            continue
+                        prev = await _snapshot(conn, wid, change_set_id)
+                        if prev is None:
+                            errors.append(f'set_chart_annotations: {op.get("widgetId")} not found')
+                            continue
+                        if prev["kind"] != "chart":
+                            errors.append(f'set_chart_annotations: {op.get("widgetId")} is not a chart')
+                            continue
+                        prev_spec = dict(prev["spec"])
+                        prev_annotations = prev_spec.get("annotations")
+                        prev_spec["annotations"] = op.get("annotations") or []
+                        spec, error = validate_spec("chart", prev_spec)
+                        if error:
+                            errors.append(f"set_chart_annotations: {error}")
+                            continue
+                        await conn.execute(
+                            """UPDATE canvas.widgets
+                               SET spec = $2, current_version = current_version + 1, updated_at = now()
+                               WHERE id = $1""",
+                            wid, spec,
+                        )
+                        applied.append({"operation": op, "widgetId": str(wid)})
+                        inverse.append(
+                            {
+                                "kind": "set_chart_annotations",
+                                "widgetId": str(wid),
+                                "annotations": prev_annotations or [],
+                            }
+                        )
+
                     elif kind in ("move_widget", "resize_widget"):
                         try:
                             wid = uid(op.get("widgetId"))
