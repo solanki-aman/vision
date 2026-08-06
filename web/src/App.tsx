@@ -26,7 +26,8 @@ const PROMPTS = [
 
 function CanvasView({ canvasId, onTitle }: { canvasId: string; onTitle: (t: string) => void }) {
   const [state, setState] = useState<CanvasState>({ canvas: null, widgets: [] });
-  const { chart: chartTheme } = useTheme();
+  const [facts, setFacts] = useState<Record<string, Fact>>({});
+  const { chart: chartTheme, mode } = useTheme();
   const [railOpen, setRailOpen] = useState(true);
   const [input, setInput] = useState("");
   const [initial, setInitial] = useState<UIMessage[] | null>(null);
@@ -164,14 +165,21 @@ function CanvasView({ canvasId, onTitle }: { canvasId: string; onTitle: (t: stri
     mono: "ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace",
     sans: "system-ui, -apple-system, 'Segoe UI', sans-serif",
   };
-  const PAPER: Record<string, string> = {
-    default: "", cream: "#faf6ec", cool: "#f2f5f8", sage: "#f2f6f1", blush: "#f9f3f1",
+  // Paper tint is mode-aware: a light paper in dark mode would fight the theme
+  // (topbar and cards stay dark while the board goes light), so each has a dark twin.
+  const PAPER: Record<string, { light: string; dark: string }> = {
+    default: { light: "", dark: "" },
+    cream: { light: "#faf6ec", dark: "#131109" },
+    cool: { light: "#f2f5f8", dark: "#0b0d11" },
+    sage: { light: "#f2f6f1", dark: "#0b0e0b" },
+    blush: { light: "#f9f3f1", dark: "#120d0c" },
   };
+  const paper = style ? PAPER[style.paper]?.[mode] : "";
   const styleVars = style
     ? ({
         ...(style.accent ? { "--accent": style.accent, "--accent-ink": style.accent, "--accent-wash": `${style.accent}1c` } : {}),
         "--display": DISPLAY[style.type] ?? DISPLAY.sans,
-        ...(PAPER[style.paper] ? { "--page": PAPER[style.paper], "--page-2": PAPER[style.paper] } : {}),
+        ...(paper ? { "--page": paper, "--page-2": paper } : {}),
       } as React.CSSProperties)
     : undefined;
 
