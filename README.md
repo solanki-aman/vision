@@ -158,7 +158,7 @@ The important edges: **Grok never touches Postgres.** Its outputs are typed tool
 | Layer | Choice | Why |
 |---|---|---|
 | Model | xAI Grok 4.5 via `xai-sdk` | Streaming, server-side agent tools, structured `chat.parse()` |
-| Server-side tools | `web_search`, `x_search`, `code_execution` | Live data + arithmetic without the model getting to write raw SQL |
+| Data tools | `web_search` (xAI web + X search, extracted into structured facts) · `code_execution` (a restricted **local** Python evaluator, not a hosted tool) | Every number on the canvas is a fact with lineage — see [above](#every-number-has-a-receipt) |
 | Images | Grok Imagine (`grok-imagine-image`) | Concept art, moods, diagrams-as-art |
 | Backend | Python 3.12 + FastAPI + asyncpg | One async loop per turn; long-lived SSE connections |
 | Schemas | Pydantic v2 | One definition drives the tool schema sent to Grok, the command validator, and the OpenAPI doc |
@@ -233,15 +233,61 @@ flowchart LR
 
 The naive alternative — "regenerate the canvas from a new prompt" — would create 12 new widgets, 12 new IDs, orphan the previous version, and break any UI state (scroll position, selection, filter) already attached to the old widgets. That's not editing. That's replacing.
 
-## How it works
+## Every number has a receipt
+
+The model never types a number into a widget. `web_search` doesn't hand it a
+paragraph to transcribe — it returns structured **facts**, each one pinned to
+the exact source sentence it was read from, and those facts are stored
+(`canvas.facts`) before any widget exists. A widget's numeric fields don't
+hold a value the model wrote; they hold a *binding* to a fact id, and
+[`server/app/commands.py`](server/app/commands.py) resolves the real value
+from that fact at write time — the model's own number, if it sent one, is
+discarded. Claim a KPI is `measured` without a fact behind it, and the
+command layer rejects the widget outright.
+
+Derived numbers get the same treatment. `code_execution` is a restricted
+*local* Python evaluator, not a hosted tool — the model names its inputs from
+facts already on the canvas, writes commented arithmetic, and the result
+becomes its own fact with `derived_from` lineage back to what it was computed
+from. A growth rate is never guessed; it's `(q1 - q4) / q4 * 100`, on the
+record.
+
+Click the **(i)** beside any number to see all of it: the search that found
+it, the query, the exact sentence it was read from and its source — or, for a
+computed figure, the named inputs (each still sourced back to its own search)
+and the code that combined them.
+
+![Provenance drill-down: inputs from web search, code interpreter, and the result](screenshots/provenance-drilldown.png)
+
+<sub>The $253.5B four-quarter total, expanded. Four sourced facts (`q1`…`q4`, each carrying NVIDIA's own press-release sentence and date) feed a commented Python sum; the result inherits both. Nothing here was typed by the model — every number on this card is either a search result or a formula over search results.</sub>
+
+Full design notes in [`data-provenance-design.md`](data-provenance-design.md).
+
+## A quieter interface
+
+The stream rail reads like a coding agent's log now, not a chat transcript.
+Narration is the prominent text; tool calls collapse into one quiet line the
+moment they finish — `✓ Computed 1 · +3 lines · 1.6s` — and only the step
+that's actually running shows a spinner. Nothing ever announces "Done"; the
+checkmark and the elapsed time say enough.
+
+![Dark mode: a populated canvas and the quiet stream rail](screenshots/dark-mode.png)
+
+<sub>Four quarters plus three derived KPIs — QoQ growth, four-quarter total, four-quarter average, peak quarter — each stacked from facts already on the canvas, each with its own <b>(i)</b>. The rail on the right shows a full run collapsed: every finished tool call is one line, narration reads in between. Dark mode used to fight itself here — a canvas's paper tint was hardcoded light regardless of theme; fixed at the root so every surface agrees now.</sub>
+
+An empty canvas got the same attention — no blank rectangle and a placeholder sentence:
+
+![The redesigned empty state](screenshots/empty-state.png)
+
+<sub>A breathing mark, a stated thesis, and seed prompts that invite the first question instead of a wall of nothing.</sub>
 
 ## The invariants
 
 Four things that hold regardless of the prompt, the model, or the widget kind:
 
-- **The agent proposes; the deterministic layer decides.** Grok never writes to the database. It calls 14 typed tools (`add_chart`, `add_kpi`, `add_table`, `add_narrative`, `add_statement`, `add_hero`, `add_label`, `add_control`, `generate_image`, `update_widget`, `remove_widget`, `set_layout`, `set_lanes`, `set_style`) whose inputs are Pydantic models. Each call becomes a change set that [`server/app/commands.py`](server/app/commands.py) validates, transacts, and versions.
+- **The agent proposes; the deterministic layer decides.** Grok never writes to the database. It calls typed tools — one `create_*`/`update_*` pair per widget kind (chart, kpi, table, narrative, hero, label, statement, image), surgical chart edits (`add_chart_series`, `remove_chart_series`, `set_chart_type`, `set_chart_annotations`), canvas-level `set_style` / `set_layout` / `set_lanes`, and the two data tools `web_search` and `code_execution` — whose inputs are Pydantic models. Each call becomes a change set that [`server/app/commands.py`](server/app/commands.py) validates, transacts, and versions.
 - **Charts are data, not code.** The model sends a typed `VisualizationSpec` — chart type, axes, series, optional annotations. [`web/src/chartAdapter.ts`](web/src/chartAdapter.ts) translates that into ECharts options using a validated colorblind-safe palette. The model cannot pick colors, emit renderer config, or ship executable code.
-- **Every widget carries provenance.** Source, as-of date, and a confidence of `measured` / `estimated` / `illustrative`, rendered as a footer with a status dot. Invented numbers are labelled as invented.
+- **Every number is a fact, not a typed literal.** `web_search` and `code_execution` write to a facts table — each fact pinned to its source snippet and query, or, if derived, to its formula and the facts it used. A widget only *binds* to a fact id; the command layer resolves the value and rejects any `measured` number that isn't backed by one. See [Every number has a receipt](#every-number-has-a-receipt).
 - **Layout is bidirectional.** Dragging or resizing a widget emits `move_widget` / `resize_widget` operations through the same command layer the agent uses, so direct manipulation and agent edits share one code path, one version history, and one undo stack (`⌘Z`).
 
 Plus one design decision that changes the feel: **the agent designs each canvas.** Before building, the model calls `set_style` — an accent hex drawn from the subject, a typographic voice (serif, mono, sans), a paper tint, and a card treatment. Two canvases about different subjects never share an identity.
@@ -252,7 +298,7 @@ Plus one design decision that changes the feel: **the agent designs each canvas.
 
 ## API surface
 
-Eleven endpoints. Two are streams; nine are plain JSON. FastAPI serves the
+Twelve endpoints. Two are streams; ten are plain JSON. FastAPI serves the
 docs at [`/docs`](http://localhost:3001/docs).
 
 | Method | Path | Purpose |
@@ -262,6 +308,7 @@ docs at [`/docs`](http://localhost:3001/docs).
 | `POST` | `/api/canvases` | Create a canvas |
 | `GET`  | `/api/canvases/{id}` | Full state: meta, style, widgets, placements |
 | `GET`  | `/api/canvases/{id}/messages` | Persisted conversation |
+| `GET`  | `/api/canvases/{id}/facts` | Every fact on the canvas, with its lineage |
 | `GET`  | `/api/canvases/{id}/events` | **SSE.** `canvas_changed` pings |
 | `POST` | `/api/canvases/{id}/commands` | Apply a change set (agent + direct manipulation share this) |
 | `POST` | `/api/canvases/{id}/compact` | Push overlapping placements down |
@@ -309,6 +356,14 @@ title match, hides the chrome, and saves a full-board PNG.
 
 ```bash
 cd web && node scripts/shoot.mjs ../screenshots "ARR vs cash" "Coffee"
+```
+
+`shoot.mjs` hides the chrome and captures just the board. For screenshots
+that need the topbar, the stream rail, or an open modal — like the ones
+above — `scripts/shoot-ui.mjs` captures the full viewport instead:
+
+```bash
+cd web && node scripts/shoot-ui.mjs ../screenshots
 ```
 
 ## Keyboard
