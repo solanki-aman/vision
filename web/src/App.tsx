@@ -194,11 +194,16 @@ function CanvasView({ canvasId, onTitle }: { canvasId: string; onTitle: (t: stri
         {empty && !busy && (
           <div className="board-empty">
             <div className="board-empty-inner">
-              <p className="hint">This canvas is empty. Ask for something.</p>
+              <div className="empty-mark" aria-hidden>◈</div>
+              <h2 className="empty-title">A blank canvas.</h2>
+              <p className="hint">
+                Ask a question and the answer arrives composed — charts, metrics, and notes you can rearrange.
+              </p>
               <div className="seeds">
                 {PROMPTS.map((p) => (
                   <button key={p} onClick={() => send(p)}>
                     {p}
+                    <span className="seed-arrow" aria-hidden>→</span>
                   </button>
                 ))}
               </div>
@@ -280,6 +285,34 @@ function CanvasView({ canvasId, onTitle }: { canvasId: string; onTitle: (t: stri
   );
 }
 
+const ICON = { width: 15, height: 15, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round", strokeLinejoin: "round" } as const;
+
+function SunIcon() {
+  return (
+    <svg {...ICON} aria-hidden>
+      <circle cx="12" cy="12" r="4.2" />
+      <path d="M12 2.4v2.4M12 19.2v2.4M4.22 4.22l1.7 1.7M18.08 18.08l1.7 1.7M2.4 12h2.4M19.2 12h2.4M4.22 19.78l1.7-1.7M18.08 5.92l1.7-1.7" />
+    </svg>
+  );
+}
+
+function MoonIcon() {
+  return (
+    <svg {...ICON} aria-hidden>
+      <path d="M20.5 14.2A8.2 8.2 0 1 1 10.3 3.7a6.4 6.4 0 0 0 10.2 10.5Z" />
+    </svg>
+  );
+}
+
+function GearIcon() {
+  return (
+    <svg {...ICON} aria-hidden>
+      <circle cx="12" cy="12" r="3.1" />
+      <path d="M19.4 13.5a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 0 1-4 0v-.09A1.7 1.7 0 0 0 8.4 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.03H2.4a2 2 0 0 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.4a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1.03-1.56V2.4a2 2 0 0 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9a1.7 1.7 0 0 0 1.56 1.03h.09a2 2 0 0 1 0 4h-.09a1.7 1.7 0 0 0-1.56 1.03Z" />
+    </svg>
+  );
+}
+
 export default function App() {
   const [canvases, setCanvases] = useState<CanvasListItem[]>([]);
   const [active, setActive] = useState<string | null>(null);
@@ -350,10 +383,10 @@ export default function App() {
             title={mode === "dark" ? "Switch to light" : "Switch to dark"}
             onClick={() => set({ mode: mode === "dark" ? "light" : "dark" })}
           >
-            {mode === "dark" ? "☀" : "☾"}
+            {mode === "dark" ? <SunIcon /> : <MoonIcon />}
           </button>
           <button className="icon" title="Settings" onClick={() => setSetOpen(true)}>
-            ⚙
+            <GearIcon />
           </button>
           <button onClick={() => active && fetch(`/api/canvases/${active}/undo`, { method: "POST" })}>undo</button>
           <button className="primary" onClick={create}>

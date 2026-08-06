@@ -160,7 +160,7 @@ export function Canvas({ widgets, entities, revealY, onLayoutChange, onRemove }:
               revealY !== null && (w.y ?? 0) > revealY ? "unrevealed" : ""
             }`}
           >
-            {w.kind !== "label" && w.kind !== "hero" && w.kind !== "control" && (
+            {w.kind !== "label" && w.kind !== "hero" && (
             <header className="widget-grip">
               <h3 title={w.title}>{w.title}</h3>
               <button className="widget-x" onClick={() => onRemove(w.id)} aria-label={`Remove ${w.title}`}>
