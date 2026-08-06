@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { GridStack, type GridStackNode } from "gridstack";
 import "gridstack/dist/gridstack.min.css";
 import { WidgetBody } from "./widgets/WidgetBody";
-import type { Widget } from "./types";
+import { ProvBadge } from "./Provenance";
+import type { Fact, Widget } from "./types";
 
 const CONFIDENCE_LABEL = {
   measured: "measured",
@@ -10,9 +11,24 @@ const CONFIDENCE_LABEL = {
   illustrative: "illustrative",
 } as const;
 
+/** The distinct facts a widget's values are bound to, in binding order. */
+function boundFactsFor(w: Widget, facts: Record<string, Fact>): Fact[] {
+  const seen = new Set<string>();
+  const out: Fact[] = [];
+  for (const b of w.bindings ?? []) {
+    const f = facts[b.factId];
+    if (f && !seen.has(f.factId)) {
+      seen.add(f.factId);
+      out.push(f);
+    }
+  }
+  return out;
+}
+
 interface Props {
   widgets: Widget[];
   entities: Record<string, string>;
+  facts: Record<string, Fact>;
   /** Present mode: rows with y above this stay hidden. null = not presenting. */
   revealY: number | null;
   onLayoutChange: (ops: { kind: "move_widget" | "resize_widget"; widgetId: string; x?: number; y?: number; w?: number; h?: number }[]) => void;
@@ -27,7 +43,7 @@ function columnsFor(width: number) {
   return FULL_COLUMNS;
 }
 
-export function Canvas({ widgets, entities, revealY, onLayoutChange, onRemove }: Props) {
+export function Canvas({ widgets, entities, facts, revealY, onLayoutChange, onRemove }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const grid = useRef<GridStack | null>(null);
   const items = useRef(new Map<string, HTMLDivElement>());
@@ -169,7 +185,7 @@ export function Canvas({ widgets, entities, revealY, onLayoutChange, onRemove }:
             </header>
             )}
             <div className="widget-body">
-              <WidgetBody widget={w} entities={entities} allWidgets={widgets} />
+              <WidgetBody widget={w} entities={entities} allWidgets={widgets} facts={facts} />
             </div>
             {w.provenance && (
               <footer className={`prov prov-${w.provenance.confidence}`}>
@@ -179,6 +195,7 @@ export function Canvas({ widgets, entities, revealY, onLayoutChange, onRemove }:
                   {w.provenance.asOf ? ` · ${w.provenance.asOf}` : ""} ·{" "}
                   {CONFIDENCE_LABEL[w.provenance.confidence]}
                 </span>
+                <ProvBadge facts={boundFactsFor(w, facts)} all={facts} />
               </footer>
             )}
           </div>

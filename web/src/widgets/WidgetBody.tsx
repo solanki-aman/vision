@@ -3,9 +3,16 @@ import * as echarts from "echarts";
 import { specToOption, type ChartSpec } from "../chartAdapter";
 import { STATUS } from "../theme";
 import { useTheme } from "../ThemeContext";
-import type { KpiSpec, TableSpec, NarrativeSpec, ImageSpec, LabelSpec, StatementSpec, HeroSpec, Widget } from "../types";
+import type { Binding, Fact, KpiSpec, TableSpec, NarrativeSpec, ImageSpec, LabelSpec, StatementSpec, HeroSpec, Widget } from "../types";
 import { useFilters, applyWindow } from "../FilterContext";
 import { matchEntity } from "../entities";
+import { ProvBadge } from "../Provenance";
+
+/** The fact bound at a given spec path on this widget, if any. */
+function factAt(bindings: Binding[] | null | undefined, facts: Record<string, Fact>, path: string): Fact | undefined {
+  const b = (bindings ?? []).find((x) => x.path === path);
+  return b ? facts[b.factId] : undefined;
+}
 
 function Chart({ spec, widgetId, entities }: { spec: ChartSpec; widgetId: string; entities: Record<string, string> }) {
   const { chart: theme, animate } = useTheme();
@@ -81,7 +88,7 @@ function Sparkline({ points, color }: { points: number[]; color?: string }) {
   );
 }
 
-function Kpi({ spec, accent }: { spec: KpiSpec; accent?: string }) {
+function Kpi({ spec, accent, fact, facts }: { spec: KpiSpec; accent?: string; fact?: Fact; facts?: Record<string, Fact> }) {
   const c = spec.comparison;
   const delta = c ? spec.value - c.baseline : 0;
   const pct = c && c.baseline !== 0 ? (delta / Math.abs(c.baseline)) * 100 : null;
@@ -95,6 +102,9 @@ function Kpi({ spec, accent }: { spec: KpiSpec; accent?: string }) {
       <div className="kpi-value">
         <span>{fmt(spec.value)}</span>
         {spec.unit && <span className="kpi-unit">{spec.unit}</span>}
+        {fact && facts && (
+          <ProvBadge facts={[fact]} all={facts} headline={`${fmt(spec.value)}${spec.unit ? ` ${spec.unit}` : ""}`} />
+        )}
       </div>
       <div className="kpi-label" title={spec.label}>
         {accent && <span className="edot" style={{ background: accent }} aria-hidden />}
@@ -208,10 +218,12 @@ export function WidgetBody({
   widget,
   entities,
   allWidgets,
+  facts,
 }: {
   widget: Widget;
   entities: Record<string, string>;
   allWidgets?: Widget[];
+  facts?: Record<string, Fact>;
 }) {
   switch (widget.kind) {
     case "chart":
@@ -227,6 +239,8 @@ export function WidgetBody({
         <Kpi
           spec={widget.spec as KpiSpec}
           accent={matchEntity(`${widget.title} ${(widget.spec as KpiSpec).label ?? ""}`, entities)}
+          fact={facts && factAt(widget.bindings, facts, "value")}
+          facts={facts}
         />
       );
     case "table":

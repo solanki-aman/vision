@@ -8,7 +8,7 @@ import { Settings } from "./Settings";
 import { useTheme } from "./ThemeContext";
 import { buildEntityColors } from "./entities";
 import { FilterProvider } from "./FilterContext";
-import type { CanvasState, CanvasStyle } from "./types";
+import type { CanvasState, CanvasStyle, Fact } from "./types";
 
 interface CanvasListItem {
   id: string;
@@ -38,6 +38,14 @@ function CanvasView({ canvasId, onTitle }: { canvasId: string; onTitle: (t: stri
     const next: CanvasState = await res.json();
     setState(next);
     if (next.canvas) onTitle(next.canvas.title);
+    fetch(`/api/canvases/${canvasId}/facts`)
+      .then((r) => r.json())
+      .then((rows: Fact[]) => {
+        const map: Record<string, Fact> = {};
+        for (const f of rows) map[f.factId] = f;
+        setFacts(map);
+      })
+      .catch(() => {});
   }, [canvasId, onTitle]);
 
   useEffect(() => {
@@ -218,6 +226,7 @@ function CanvasView({ canvasId, onTitle }: { canvasId: string; onTitle: (t: stri
         <Canvas
           widgets={state.widgets}
           entities={entities}
+          facts={facts}
           revealY={revealY}
           onLayoutChange={applyOps}
           onRemove={(widgetId) => applyOps([{ kind: "remove_widget", widgetId }])}
