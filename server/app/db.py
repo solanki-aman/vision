@@ -77,6 +77,27 @@ CREATE TABLE IF NOT EXISTS canvas.placements (
 );
 CREATE INDEX IF NOT EXISTS idx_placements_canvas ON canvas.placements (canvas_id, y, x);
 
+CREATE TABLE IF NOT EXISTS canvas.facts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  canvas_id UUID NOT NULL REFERENCES canvas.canvases(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL DEFAULT 'scalar',
+  entity TEXT,
+  label TEXT NOT NULL,
+  unit TEXT,
+  as_of TEXT,
+  value DOUBLE PRECISION,
+  points JSONB,
+  tool TEXT NOT NULL DEFAULT 'web_search',
+  query TEXT,
+  snippet TEXT,
+  source_url TEXT,
+  confidence TEXT NOT NULL DEFAULT 'measured',
+  derived_from JSONB,
+  formula TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_facts_canvas ON canvas.facts (canvas_id, created_at);
+
 CREATE TABLE IF NOT EXISTS canvas.change_sets (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   canvas_id UUID NOT NULL REFERENCES canvas.canvases(id) ON DELETE CASCADE,
@@ -153,6 +174,12 @@ async def init_db() -> None:
     async with _pool.acquire() as conn:
         await conn.execute(SCHEMA)
         await conn.execute("ALTER TABLE canvas.canvases ADD COLUMN IF NOT EXISTS style JSONB")
+        await conn.execute("ALTER TABLE canvas.widgets ADD COLUMN IF NOT EXISTS bindings JSONB")
+        await conn.execute("ALTER TABLE canvas.facts ADD COLUMN IF NOT EXISTS inputs JSONB")
+        # created_at is transaction-start time in Postgres, so every row a single
+        # save_messages() call writes shares one timestamp — a user prompt and its
+        # own reply can tie. seq is a true insertion-order tiebreak.
+        await conn.execute("ALTER TABLE conversation.messages ADD COLUMN IF NOT EXISTS seq BIGSERIAL")
         await conn.execute(MESSAGE_PK_REPAIR)
 
 
@@ -216,7 +243,7 @@ async def rename_canvas_if_untitled(canvas_id: Any, title: str) -> None:
 async def get_canvas_state(canvas_id: Any) -> dict[str, Any]:
     cid = uid(canvas_id)
     widgets = await pool().fetch(
-        """SELECT w.id, w.kind, w.title, w.spec, w.provenance, w.current_version,
+        """SELECT w.id, w.kind, w.title, w.spec, w.provenance, w.bindings, w.current_version,
                   p.x, p.y, p.w, p.h
            FROM canvas.widgets w
            LEFT JOIN canvas.placements p ON p.widget_id = w.id
@@ -272,9 +299,31 @@ async def get_canvas_summary(canvas_id: Any) -> str:
         lines.append(f'- {w["id"]} | {kind} | "{w["title"]}" | {at} | {detail}')
 
     body = "\n".join(lines)
+
+    fact_rows = await pool().fetch(
+        """SELECT id, kind, entity, label, unit, as_of, value FROM canvas.facts
+           WHERE canvas_id = $1 ORDER BY created_at DESC LIMIT 40""",
+        uid(canvas_id),
+    )
+    if fact_rows:
+        flines = []
+        for f in fact_rows:
+            if f["value"] is not None:
+                val = f'{f["value"]}{f["unit"] or ""}'
+            else:
+                val = "series" if f["kind"] == "series" else "?"
+            asof = f' as of {f["as_of"]}' if f["as_of"] else ""
+            flines.append(f'- {f["id"]} | {f["entity"] or ""} · {f["label"]} = {val}{asof}')
+        facts_block = (
+            "\n\nAvailable facts — bind every measured number to one of these ids "
+            "instead of typing it:\n" + "\n".join(flines)
+        )
+    else:
+        facts_block = ""
+
     return (
         f"{style_line}\nCanvas has {len(widgets)} widget(s), "
-        f"grid is 12 columns wide:\n{body}"
+        f"grid is 12 columns wide:\n{body}{facts_block}"
     )
 
 
@@ -287,10 +336,85 @@ async def set_canvas_style(canvas_id: Any, style: Any) -> None:
     await audit("set_style", "applied", "canvas", canvas_id, style)
 
 
+async def record_facts(
+    canvas_id: Any,
+    facts: Sequence[dict[str, Any]],
+    *,
+    tool: str,
+    query: str | None,
+) -> list[dict[str, Any]]:
+    """Persist retrieved facts with their lineage; returns them with assigned ids.
+
+    This is the only place a number enters the canvas with provenance: search
+    extracts it, this stores value + source + query, later a widget binds to the id.
+    """
+    cid = uid(canvas_id)
+    out: list[dict[str, Any]] = []
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            for f in facts:
+                row = await conn.fetchrow(
+                    """INSERT INTO canvas.facts
+                         (canvas_id, kind, entity, label, unit, as_of, value, points,
+                          tool, query, snippet, source_url, confidence, derived_from, formula, inputs)
+                       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+                       RETURNING id, kind, entity, label, unit, as_of, value, points,
+                                 source_url, confidence""",
+                    cid,
+                    f.get("kind") or "scalar",
+                    f.get("entity"),
+                    f.get("label"),
+                    f.get("unit"),
+                    f.get("asOf"),
+                    f.get("value"),
+                    f.get("points"),
+                    tool,
+                    query,
+                    f.get("snippet"),
+                    f.get("sourceUrl"),
+                    f.get("confidence") or "measured",
+                    f.get("derivedFrom"),
+                    f.get("formula"),
+                    f.get("inputs"),
+                )
+                out.append({"factId": str(row["id"]), **{k: row[k] for k in row.keys() if k != "id"}})
+    await audit("record_facts", "applied", "canvas", canvas_id, {"count": len(out), "tool": tool})
+    return out
+
+
+async def get_facts(canvas_id: Any) -> list[dict[str, Any]]:
+    rows = await pool().fetch(
+        """SELECT id, kind, entity, label, unit, as_of, value, points, tool, query,
+                  snippet, source_url, confidence, derived_from, formula, inputs, created_at
+           FROM canvas.facts WHERE canvas_id = $1 ORDER BY created_at""",
+        uid(canvas_id),
+    )
+    return rows_to_dicts(rows)
+
+
+async def get_facts_by_ids(canvas_id: Any, ids: Sequence[str]) -> dict[str, dict[str, Any]]:
+    """The subset of a canvas's facts named by id — inputs for a compute step."""
+    if not ids:
+        return {}
+    try:
+        uids = [uid(i) for i in ids]
+    except (ValueError, AttributeError, TypeError):
+        return {}
+    rows = await pool().fetch(
+        """SELECT id, kind, entity, label, unit, value, points, confidence
+           FROM canvas.facts WHERE canvas_id = $1 AND id = ANY($2::uuid[])""",
+        uid(canvas_id),
+        uids,
+    )
+    return {str(r["id"]): dict(r) for r in rows}
+
+
 async def get_messages(canvas_id: Any) -> list[dict[str, Any]]:
+    # seq (insertion order), not created_at: a turn's user prompt and its own
+    # reply are written in one transaction and can share a timestamp.
     rows = await pool().fetch(
         """SELECT id, role, parts FROM conversation.messages
-           WHERE canvas_id = $1 ORDER BY created_at""",
+           WHERE canvas_id = $1 ORDER BY seq""",
         uid(canvas_id),
     )
     return rows_to_dicts(rows)

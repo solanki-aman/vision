@@ -16,6 +16,7 @@ from .db import (
     close_db,
     create_canvas,
     get_canvas_state,
+    get_facts,
     get_history,
     get_messages,
     init_db,
@@ -66,6 +67,33 @@ async def canvas(canvas_id: str) -> dict[str, Any]:
 @app.get("/api/canvases/{canvas_id}/messages")
 async def messages(canvas_id: str) -> list[dict[str, Any]]:
     return await get_messages(canvas_id)
+
+
+@app.get("/api/canvases/{canvas_id}/facts")
+async def facts(canvas_id: str) -> list[dict[str, Any]]:
+    """The lineage behind the numbers — one record per retrieved or computed fact."""
+    rows = await get_facts(canvas_id)
+    return [
+        {
+            "factId": str(r["id"]),
+            "kind": r["kind"],
+            "entity": r["entity"],
+            "label": r["label"],
+            "unit": r["unit"],
+            "asOf": r["as_of"],
+            "value": r["value"],
+            "points": r["points"],
+            "tool": r["tool"],
+            "query": r["query"],
+            "snippet": r["snippet"],
+            "sourceUrl": r["source_url"],
+            "confidence": r["confidence"],
+            "derivedFrom": r["derived_from"],
+            "formula": r["formula"],
+            "inputs": r["inputs"],
+        }
+        for r in rows
+    ]
 
 
 @app.get("/api/canvases/{canvas_id}/events")

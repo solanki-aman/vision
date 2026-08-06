@@ -12,6 +12,8 @@ from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, ConfigDict, Field
 
 from .commands import apply_change_set, apply_lanes, apply_layout
+from .compute import run_compute
+from .db import get_facts_by_ids, record_facts
 from .echarts import build_echarts_option
 from .imagine import generate_image
 from .search import run_search
@@ -60,11 +62,34 @@ def _to_size(size: dict[str, Any] | None) -> dict[str, int] | None:
 
 # ---- create inputs (one per element kind) ---------------------------------------
 
+class Binding(ToolInput):
+    path: str = Field(
+        description=(
+            "Dotted path to the value this fact fills: 'value', 'comparison.baseline', "
+            "'series.0' (a whole series from a series-fact), 'sparkline', 'lines.3.value', "
+            "'rows.2.revenue'."
+        )
+    )
+    factId: str = Field(description="A factId returned by web_search.")
+
+
+BINDINGS_FIELD = Field(
+    default=None,
+    description=(
+        "Bind every measured number to a fact from web_search — one entry per scalar value, or "
+        "one per series (bind 'series.N' to a series-fact and its data is filled for you). "
+        "Required whenever provenance.confidence is 'measured': the command layer fills the value "
+        "from the fact and rejects any measured number left unbound. Never hand-type a searched number."
+    ),
+)
+
+
 class ChartInput(ToolInput):
     title: str = TITLE_FIELD
     provenance: Provenance
     size: Size | None = SIZE_FIELD
     spec: ChartSpec
+    bindings: list[Binding] | None = BINDINGS_FIELD
 
 
 class KpiInput(ToolInput):
@@ -72,6 +97,7 @@ class KpiInput(ToolInput):
     provenance: Provenance
     size: Size | None = SIZE_FIELD
     spec: KpiSpec
+    bindings: list[Binding] | None = BINDINGS_FIELD
 
 
 class TableInput(ToolInput):
@@ -79,6 +105,7 @@ class TableInput(ToolInput):
     provenance: Provenance
     size: Size | None = SIZE_FIELD
     spec: TableSpec
+    bindings: list[Binding] | None = BINDINGS_FIELD
 
 
 class NarrativeInput(ToolInput):
@@ -93,12 +120,14 @@ class StatementInput(ToolInput):
     provenance: Provenance
     size: Size | None = SIZE_FIELD
     spec: StatementSpec
+    bindings: list[Binding] | None = BINDINGS_FIELD
 
 
 class HeroInput(ToolInput):
     title: str
     spec: HeroSpec
     size: Size | None = SIZE_FIELD
+    bindings: list[Binding] | None = BINDINGS_FIELD
 
 
 class LabelInput(ToolInput):
@@ -120,18 +149,21 @@ class UpdateChartInput(ToolInput):
     widgetId: str = WIDGET_ID_FIELD
     title: str | None = None
     spec: ChartSpec = Field(description="Full replacement chart spec — include every field to keep.")
+    bindings: list[Binding] | None = BINDINGS_FIELD
 
 
 class UpdateKpiInput(ToolInput):
     widgetId: str = WIDGET_ID_FIELD
     title: str | None = None
     spec: KpiSpec
+    bindings: list[Binding] | None = BINDINGS_FIELD
 
 
 class UpdateTableInput(ToolInput):
     widgetId: str = WIDGET_ID_FIELD
     title: str | None = None
     spec: TableSpec
+    bindings: list[Binding] | None = BINDINGS_FIELD
 
 
 class UpdateNarrativeInput(ToolInput):
@@ -156,6 +188,7 @@ class UpdateStatementInput(ToolInput):
     widgetId: str = WIDGET_ID_FIELD
     title: str | None = None
     spec: StatementSpec
+    bindings: list[Binding] | None = BINDINGS_FIELD
 
 
 # ---- surgical / generic inputs --------------------------------------------------
@@ -164,6 +197,41 @@ class WebSearchInput(ToolInput):
     query: str = Field(
         description="A focused search query for current, real or checkable facts — "
         "numbers, dates, prices, rankings, events."
+    )
+
+
+class ComputeVar(ToolInput):
+    name: str = Field(
+        description="A short, self-explanatory variable name the code uses, e.g. 'q1_rev' or "
+        "'prior_q_rev'. It is shown to the reader in the drill-down, so make it meaningful — not 'x'."
+    )
+    factId: str = Field(
+        description="The fact whose value fills this variable — its number for a scalar fact, "
+        "its list of y-values for a series fact."
+    )
+
+
+class ComputeInput(ToolInput):
+    label: str = Field(description="What the computed number measures, e.g. 'QoQ revenue growth'.")
+    unit: str | None = Field(default=None, description="Unit of the result, e.g. '%', 'USD B'.")
+    entity: str | None = Field(default=None, description="The subject, for the colour thread.")
+    kind: Literal["scalar", "series"] = Field(
+        default="scalar", description="scalar for one number, series for a computed vector."
+    )
+    inputs: list[ComputeVar] = Field(
+        description="The facts to compute from, each bound to a variable name the code uses."
+    )
+    code: str = Field(
+        description=(
+            "Python that computes the answer and assigns it to `result`. The code is shown to the "
+            "reader AS the explanation of the number, so write it to be read: a short comment on each "
+            "step, meaningful names, intermediates spelled out. Example:\n"
+            "# Q1 FY27 revenue vs the prior quarter, as a percent change\n"
+            "growth = (q1_rev - q4_rev) / q4_rev * 100\n"
+            "result = round(growth, 1)\n"
+            "For a series, result must be a list of numbers aligned to a series input's points. Only "
+            "arithmetic and math.* are available."
+        )
     )
 
 
@@ -184,6 +252,13 @@ class AddChartSeriesInput(ToolInput):
             "One entry per line/bar/slice to append. Each series' data must be aligned to the "
             "chart's existing xAxis categories — same length, same order. Names already on the "
             "chart are ignored."
+        ),
+    )
+    factIds: list[str] | None = Field(
+        default=None,
+        description=(
+            "Optional, aligned to `series`: the series-fact id backing each appended series. When "
+            "given, the command layer fills that series' data from the fact and records provenance."
         ),
     )
 
@@ -272,6 +347,7 @@ def build_tools(
                     "title": args["title"],
                     "spec": args["spec"],
                     "provenance": args.get("provenance"),
+                    "bindings": args.get("bindings"),
                     "size": _to_size(args.get("size")),
                 }
             )
@@ -292,6 +368,7 @@ def build_tools(
                 "title": args["title"],
                 "spec": args["spec"],
                 "provenance": args.get("provenance"),
+                "bindings": args.get("bindings"),
                 "size": _to_size(args.get("size")),
             }
         )
@@ -317,6 +394,7 @@ def build_tools(
                 "widgetId": args["widgetId"],
                 "title": args.get("title"),
                 "spec": args.get("spec"),
+                "bindings": args.get("bindings"),
             }
         )
 
@@ -338,7 +416,12 @@ def build_tools(
     # ---- surgical chart edits ---------------------------------------------------
     async def run_add_chart_series(args: dict[str, Any]) -> dict[str, Any]:
         return await place(
-            {"kind": "add_chart_series", "widgetId": args["widgetId"], "series": args["series"]}
+            {
+                "kind": "add_chart_series",
+                "widgetId": args["widgetId"],
+                "series": args["series"],
+                "factIds": args.get("factIds"),
+            }
         )
 
     async def run_remove_chart_series(args: dict[str, Any]) -> dict[str, Any]:
@@ -381,7 +464,86 @@ def build_tools(
         return result
 
     async def run_web_search(args: dict[str, Any]) -> dict[str, Any]:
-        return await run_search(args["query"])
+        result = await run_search(args["query"])
+        stored = (
+            await record_facts(canvas_id, result.get("facts") or [], tool="web_search", query=args["query"])
+            if result.get("facts")
+            else []
+        )
+        return {
+            "ok": result.get("ok", True),
+            "summary": result.get("summary", ""),
+            "sources": result.get("sources", []),
+            "facts": [
+                {
+                    "factId": s["factId"],
+                    "entity": s.get("entity"),
+                    "label": s.get("label"),
+                    "value": s.get("value"),
+                    "unit": s.get("unit"),
+                    "asOf": s.get("as_of"),
+                    "source": s.get("source_url"),
+                }
+                for s in stored
+            ],
+        }
+
+    async def run_code_execution(args: dict[str, Any]) -> dict[str, Any]:
+        specs = args.get("inputs") or []
+        ids = [s["factId"] for s in specs]
+        facts = await get_facts_by_ids(canvas_id, ids)
+        env: dict[str, Any] = {}
+        series_x: list[str] | None = None
+        for s in specs:
+            f = facts.get(str(s["factId"]))
+            if f is None:
+                return {"ok": False, "errors": [f'compute input fact {s["factId"]} not found']}
+            if f["kind"] == "series":
+                pts = f["points"] or []
+                env[s["name"]] = [p.get("y") for p in pts]
+                if series_x is None:
+                    series_x = [p.get("x") for p in pts]
+            else:
+                env[s["name"]] = f["value"]
+        try:
+            result = run_compute(args["code"], env)
+        except ValueError as e:
+            return {"ok": False, "errors": [str(e)]}
+
+        kind = args.get("kind") or "scalar"
+        fact: dict[str, Any] = {
+            "kind": kind,
+            "entity": args.get("entity"),
+            "label": args["label"],
+            "unit": args.get("unit"),
+            "confidence": "estimated",
+            "derivedFrom": ids,
+            "formula": args["code"],
+            # The variable→fact mapping, so the drill-down can name each input and its source.
+            "inputs": [{"name": s["name"], "factId": s["factId"]} for s in specs],
+        }
+        if kind == "series":
+            if not isinstance(result, (list, tuple)):
+                return {"ok": False, "errors": ["a series compute must return a list of numbers"]}
+            xs = series_x or [str(i) for i in range(len(result))]
+            fact["points"] = [
+                {"x": xs[i] if i < len(xs) else str(i), "y": v} for i, v in enumerate(result)
+            ]
+        else:
+            if not isinstance(result, (int, float)) or isinstance(result, bool):
+                return {"ok": False, "errors": ["a scalar compute must return a single number"]}
+            fact["value"] = float(result)
+
+        stored = await record_facts(canvas_id, [fact], tool="code_execution", query=None)
+        on_change()
+        return {
+            "ok": True,
+            "factId": stored[0]["factId"],
+            "label": args["label"],
+            "value": fact.get("value"),
+            "unit": args.get("unit"),
+            "derivedFrom": ids,
+        }
 
     def tool(
         name: str,
@@ -404,9 +566,20 @@ def build_tools(
             "Search the live web and X for current, real or checkable facts — numbers, "
             "dates, prices, rankings, recent events. Call this FIRST, before building, "
             "whenever a question touches anything you should not guess. Returns a factual "
-            "brief and its source URLs; use those numbers in the widgets you then build.",
+            "brief, its source URLs, and structured facts each with a factId — bind every "
+            "measured number you build to one of those factIds instead of typing it.",
             WebSearchInput,
             run_web_search,
+        ),
+        tool(
+            "code_execution",
+            "Run Python over facts to compute a derived number — a growth rate, ratio, sum, or "
+            "reshaped series — instead of doing the arithmetic yourself. Name each input fact, write "
+            "code that assigns `result`, and it returns a new factId you bind like any other. The "
+            "computed fact stores its formula and the facts it came from, so its provenance shows the "
+            "whole derivation. Prefer this over mental math for any number you present.",
+            ComputeInput,
+            run_code_execution,
         ),
         tool(
             "set_style",
