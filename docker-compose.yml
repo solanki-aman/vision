@@ -30,6 +30,10 @@ services:
         condition: service_healthy
     volumes:
       - ./server/app:/app/app
+      # Mounted so `docker compose exec server pytest` runs the tests in the
+      # same environment the service itself runs in.
+      - ./server/tests:/app/tests
+      - ./server/pytest.ini:/app/pytest.ini
 
   shooter:
     build: ./shooter
