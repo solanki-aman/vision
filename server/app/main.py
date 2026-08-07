@@ -32,7 +32,15 @@ log = logging.getLogger("vision")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
-    log.info("vision server ready on :%s (%s)", settings.port, settings.xai_model)
+    log.info(
+        "vision server ready on :%s (%s, effort=%s)%s",
+        settings.port,
+        settings.xai_model,
+        settings.xai_reasoning_effort,
+        f" · tracing → LangSmith project {settings.langsmith_project!r}"
+        if settings.langsmith_tracing
+        else "",
+    )
     yield
     await close_db()
 

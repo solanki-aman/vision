@@ -170,7 +170,20 @@ async def run_turn(
     reasoning_buf: list[str] = []
     step_open = False
 
-    config = {"recursion_limit": 2 * settings.max_steps + 1}
+    # Name and tag the run so a LangSmith trace is findable later: turns are grouped
+    # per canvas, and the prompt that caused them is right there on the run.
+    config = {
+        "recursion_limit": 2 * settings.max_steps + 1,
+        "run_name": "vision.turn",
+        "tags": ["vision", f"canvas:{canvas_id}"],
+        "metadata": {
+            "canvas_id": canvas_id,
+            "prompt": prompt_text[:300],
+            "model": settings.xai_model,
+            "reasoning_effort": settings.xai_reasoning_effort,
+            "widgets_before": summary.count("\n- "),
+        },
+    }
 
     yield ui.start(message_id)
 

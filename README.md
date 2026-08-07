@@ -391,6 +391,20 @@ themselves when one isn't reachable.
 docker compose exec server python -m pytest -q
 ```
 
+## Tracing
+
+Set the `LANGSMITH_*` variables in `.env` and every turn becomes one trace: the
+graph loop, each tool call, and — because search runs on the raw xai-sdk outside
+LangChain, where it would otherwise be a blind spot — the `web_search` step too.
+Runs are named `vision.turn` and tagged `canvas:<id>`, with the prompt, model and
+reasoning effort on the run, so a slow or wrong turn is findable after the fact.
+
+It answers questions the UI can't. On a two-search Tesla turn: `ChatXAI` 2.8s,
+the two searches 37.5s and 29.2s. The composer is not what makes a turn slow —
+which is the whole argument for `XAI_SEARCH_MODEL`.
+
+Leave `LANGSMITH_TRACING` unset and none of it runs.
+
 ## Export
 
 Any canvas can leave as a file: **PNG** for pasting, **PDF** for sending. The

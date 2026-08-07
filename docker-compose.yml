@@ -21,6 +21,13 @@ services:
       DATABASE_URL: postgres://vision:vision@postgres:5432/vision
       XAI_API_KEY: ${XAI_API_KEY:-}
       XAI_MODEL: ${XAI_MODEL:-grok-4.5}
+      XAI_REASONING_EFFORT: ${XAI_REASONING_EFFORT:-low}
+      XAI_SEARCH_MODEL: ${XAI_SEARCH_MODEL:-}
+      # LangSmith reads these itself; unset LANGSMITH_TRACING to turn tracing off.
+      LANGSMITH_TRACING: ${LANGSMITH_TRACING:-}
+      LANGSMITH_ENDPOINT: ${LANGSMITH_ENDPOINT:-https://api.smith.langchain.com}
+      LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
+      LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-vision}
       PORT: 3001
       SHOOTER_URL: http://shooter:3002
     ports:
