@@ -61,7 +61,7 @@ def _extract_json(text: str) -> dict[str, Any]:
 
 async def run_search(query: str) -> dict[str, Any]:
     chat = client().chat.create(
-        model=settings.xai_model,
+        model=settings.search_model,
         tools=[web_search(), x_search()],
         store_messages=False,
     )

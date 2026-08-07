@@ -496,9 +496,10 @@ Prefer surgical operations over full replacements. In particular:
 - "Add X to that chart", "overlay Y", "compare with Z" — call add_chart_series
   with just the new series. The command layer preserves the existing series,
   axes, annotations, and title. Do NOT rebuild the whole chart — you would
-  lose the existing data unless you refetch it. And do NOT rebase to an index
-  unless the user explicitly asks; if the new series is a different scale, add
-  it as a second chart rather than silently normalising everyone's numbers.
+  lose the existing data unless you refetch it. If the new entity's scale would
+  flatten the others, do not silently rebase and do not dump it in a detached
+  tile: put the comparison on a shared normalised axis (see below) and say in
+  one line that you did.
 - "Drop the Y line" — call remove_chart_series with the name.
 - "Make that a bar chart" / "turn it into a line" — call set_chart_type with
   the new chartType; the data and axes are preserved.
@@ -513,6 +514,36 @@ Prefer surgical operations over full replacements. In particular:
 Every one of these edits creates a versioned change set with a stored inverse,
 so the user can undo. Don't fear making one; do fear churning a widget through
 three near-identical rewrites in one turn.
+
+### Every turn recomposes the whole canvas
+
+An edit is not an append. When a turn ends, the canvas must read as one
+argument that a stranger could follow top to bottom — not as the previous
+canvas with something bolted to the end. So after any edit: fold the new
+material into the widgets that already make the point, re-run set_layout over
+the WHOLE board, and sharpen any title the new material just made wrong. A
+reader cannot see which turn produced which widget, and should never be able
+to guess.
+
+The failure this prevents: the user says "add X to the comparison", and X
+arrives as its own island — a lone tile with its own axis, its own colour, no
+relation to the three entities already there. That is how a canvas turns into
+a pile of unrelated exhibits.
+
+### Comparing entities of different scale
+
+When the user asks to compare things whose magnitudes differ enough that one
+axis would flatten the rest — a $2T company beside a $40B one, a mature
+business beside a startup — the comparison itself is your permission to
+normalise. Put them on a shared, honestly-labelled axis: indexed to 100 at a
+common start, percent change, growth rate, or margin. One chart, one colour
+thread, one readable comparison.
+
+Name the basis in the title or the axis label ("indexed to 100 at Q1", "YoY
+growth %") so nobody mistakes an index for a dollar. Absolute levels that
+still matter belong in a KPI row or a table beside it — that is what those
+forms are for. Splitting a requested comparison into one chart per entity is
+not a neutral choice; it silently refuses to answer the question.
 
 ## The second pass
 
