@@ -313,6 +313,14 @@ function MoonIcon() {
   );
 }
 
+function DownloadIcon() {
+  return (
+    <svg {...ICON} aria-hidden>
+      <path d="M12 3.5v11m0 0l-4-4m4 4l4-4M4.5 19.5h15" />
+    </svg>
+  );
+}
+
 function GearIcon() {
   return (
     <svg {...ICON} aria-hidden>
@@ -330,10 +338,44 @@ export default function App() {
   const [setOpen, setSetOpen] = useState(false);
   const { mode, set } = useTheme();
 
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exporting, setExporting] = useState<string | null>(null);
+
   const refreshList = useCallback(async () => {
     const res = await fetch("/api/canvases");
     setCanvases(await res.json());
   }, []);
+
+  /** Rendering a tall board takes a few seconds, so fetch it rather than
+   * navigating — that way the button can show progress and report a failure. */
+  const exportCanvas = useCallback(
+    async (format: "png" | "pdf") => {
+      if (!active) return;
+      setExporting(format);
+      setExportOpen(false);
+      try {
+        const res = await fetch(`/api/canvases/${active}/export?format=${format}`);
+        if (!res.ok) throw new Error(`export failed (${res.status})`);
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download =
+          res.headers.get("Content-Disposition")?.match(/filename="(.+?)"/)?.[1] ??
+          `canvas.${format}`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } catch (e) {
+        console.error(e);
+        alert(`Could not export this canvas as ${format.toUpperCase()}.`);
+      } finally {
+        setExporting(null);
+      }
+    },
+    [active],
+  );
 
   useEffect(() => {
     refreshList();
@@ -394,6 +436,31 @@ export default function App() {
           >
             {mode === "dark" ? <SunIcon /> : <MoonIcon />}
           </button>
+          <div className="export-wrap">
+            <button
+              className="icon"
+              title="Export this canvas"
+              aria-haspopup="menu"
+              aria-expanded={exportOpen}
+              disabled={!active || exporting !== null}
+              onClick={() => setExportOpen((v) => !v)}
+            >
+              {exporting ? <span className="spin spin-dark" /> : <DownloadIcon />}
+            </button>
+            {exportOpen && (
+              <>
+                <div className="export-scrim" onClick={() => setExportOpen(false)} />
+                <div className="export-menu" role="menu">
+                  <button role="menuitem" onClick={() => exportCanvas("png")}>
+                    PNG <em>image</em>
+                  </button>
+                  <button role="menuitem" onClick={() => exportCanvas("pdf")}>
+                    PDF <em>document</em>
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
           <button className="icon" title="Settings" onClick={() => setSetOpen(true)}>
             <GearIcon />
           </button>

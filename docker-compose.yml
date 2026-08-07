@@ -41,6 +41,10 @@ services:
       WEB_URL: http://web:5173
     ports:
       - "3002:3002"
+    volumes:
+      # Mounted like ./server/app and ./web/src, so a renderer change only needs
+      # `docker compose restart shooter` rather than an image rebuild.
+      - ./shooter/index.mjs:/app/index.mjs
     depends_on:
       - web
 

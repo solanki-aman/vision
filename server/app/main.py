@@ -1,12 +1,14 @@
 """FastAPI application. Deterministic canvas endpoints plus one streaming agent turn."""
 
 import logging
+import re
 from contextlib import asynccontextmanager
 from typing import Any
 
+import httpx
 from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from . import events, uistream as ui
 from .agent import run_turn
@@ -94,6 +96,46 @@ async def facts(canvas_id: str) -> list[dict[str, Any]]:
         }
         for r in rows
     ]
+
+
+def _filename(title: str, fmt: str) -> str:
+    """A safe, recognisable download name derived from the canvas title."""
+    slug = re.sub(r"[^a-z0-9]+", "-", (title or "canvas").lower()).strip("-")[:60]
+    return f"{slug or 'canvas'}.{fmt}"
+
+
+@app.get("/api/canvases/{canvas_id}/export")
+async def export_canvas(canvas_id: str, format: str = "png") -> Response:
+    """Render the whole board headlessly and return it as a download.
+
+    The rendering itself belongs to the shooter service, which already owns the
+    only browser in the stack — this just names the file and streams the bytes.
+    """
+    if format not in ("png", "pdf"):
+        raise HTTPException(status_code=400, detail="format must be png or pdf")
+
+    state = await get_canvas_state(canvas_id)
+    if not state.get("canvas"):
+        raise HTTPException(status_code=404, detail="canvas not found")
+
+    try:
+        async with httpx.AsyncClient(timeout=120) as http:
+            res = await http.post(
+                f"{settings.shooter_url}/export",
+                json={"canvasId": canvas_id, "format": format},
+            )
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"renderer unreachable: {e}") from e
+
+    if res.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"render failed: {res.text[:200]}")
+
+    name = _filename(state["canvas"].get("title", ""), format)
+    return Response(
+        content=res.content,
+        media_type="application/pdf" if format == "pdf" else "image/png",
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
 
 
 @app.get("/api/canvases/{canvas_id}/events")

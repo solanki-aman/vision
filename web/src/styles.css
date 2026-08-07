@@ -121,6 +121,42 @@ body {
 .top-actions button:hover { color: var(--ink); border-color: var(--muted); transform: translateY(-1px); }
 .top-actions .icon { display: grid; place-items: center; padding: 7px; line-height: 0; }
 .top-actions .icon svg { display: block; }
+/* export menu */
+.export-wrap { position: relative; display: inline-flex; }
+.export-scrim { position: fixed; inset: 0; z-index: 30; }
+.export-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 31;
+  min-width: 168px;
+  padding: 5px;
+  border-radius: 11px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  animation: rise 0.16s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+.export-menu button {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  width: 100%;
+  background: none;
+  border: none;
+  box-shadow: none;
+  color: var(--ink-2);
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 7px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.export-menu button:hover { background: var(--hover); color: var(--ink); transform: none; border-color: transparent; }
+.export-menu button em { font-style: normal; font-size: 11.5px; color: var(--faint); }
+/* the topbar button is light-on-surface, so its spinner needs ink, not white */
+.spin-dark { border-color: var(--line); border-top-color: var(--accent); }
+
 .top-actions .primary {
   background: var(--accent);
   border-color: transparent;
