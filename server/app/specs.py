@@ -259,6 +259,43 @@ class Provenance(Spec):
     note: str | None = None
 
 
+class FactPoint(Spec):
+    x: str = Field(description="Category or date this value sits at, e.g. '2025-07-30' or 'Q2'.")
+    y: float | None = Field(description="The value at x; null for a gap.")
+
+
+class Fact(Spec):
+    """A single retrieved datum carrying its own lineage. Scalar (one number) or
+    series (a vector — a time series or ranked set that shares one source)."""
+
+    kind: Literal["scalar", "series"] = "scalar"
+    entity: str | None = Field(
+        default=None, description="The subject this measures — a ticker, company, team, product."
+    )
+    label: str = Field(description="What it measures, e.g. 'FY25 revenue' or 'daily close'.")
+    unit: str | None = Field(default=None, description="Unit of the value(s), e.g. '%', 'USD', 'USD B'.")
+    asOf: str | None = Field(default=None, description="The date or period the figure is stated as of.")
+    value: float | None = Field(default=None, description="The scalar value. Omit for a series.")
+    points: list[FactPoint] | None = Field(
+        default=None, description="Series values, oldest first. Omit for a scalar."
+    )
+    snippet: str | None = Field(
+        default=None, description="The exact source sentence the number was read from."
+    )
+    sourceUrl: str | None = Field(default=None, description="URL the figure came from.")
+    confidence: Literal["measured", "estimated", "illustrative"] = "measured"
+
+
+def validate_fact(data: Any) -> tuple[dict[str, Any] | None, str | None]:
+    """Returns (validated fact, error message). One of the two is always None."""
+    try:
+        parsed = Fact.model_validate(data)
+    except ValidationError as e:
+        issues = "; ".join(f'{".".join(str(p) for p in i["loc"])} {i["msg"]}' for i in e.errors())
+        return None, issues
+    return parsed.model_dump(mode="json", exclude_none=True), None
+
+
 SPEC_BY_KIND: dict[str, type[Spec]] = {
     "chart": ChartSpec,
     "kpi": KpiSpec,

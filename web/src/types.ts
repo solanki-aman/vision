@@ -53,12 +53,38 @@ export interface HeroSpec {
   kicker?: string;
 }
 
+export interface Binding {
+  path: string;
+  factId: string;
+}
+
+/** A number (or series) with its lineage — how the canvas knows where a figure came from. */
+export interface Fact {
+  factId: string;
+  kind: "scalar" | "series";
+  entity?: string | null;
+  label: string;
+  unit?: string | null;
+  asOf?: string | null;
+  value?: number | null;
+  points?: { x: string; y: number | null }[] | null;
+  tool: string;
+  query?: string | null;
+  snippet?: string | null;
+  sourceUrl?: string | null;
+  confidence: "measured" | "estimated" | "illustrative";
+  derivedFrom?: string[] | null;
+  formula?: string | null;
+  inputs?: { name: string; factId: string }[] | null;
+}
+
 export interface Widget {
   id: string;
   kind: "chart" | "kpi" | "table" | "narrative" | "image" | "label" | "statement" | "hero";
   title: string;
   spec: ChartSpec | KpiSpec | TableSpec | NarrativeSpec | ImageSpec | LabelSpec | StatementSpec | HeroSpec;
   provenance: Provenance | null;
+  bindings?: Binding[] | null;
   x: number;
   y: number;
   w: number;

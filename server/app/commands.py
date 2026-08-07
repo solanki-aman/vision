@@ -55,6 +55,168 @@ class ApplyResult(TypedDict):
     errors: list[str]
 
 
+# ---- fact binding -----------------------------------------------------------
+# A binding maps a spec path to a fact id. The command layer resolves the fact's
+# stored value INTO the spec here, so the model's typed number is discarded and the
+# fact is the source of record — the structural half of "the LLM does not inject data".
+
+def _norm_path(path: str) -> list[str]:
+    return [p for p in path.replace("[", ".").replace("]", ".").split(".") if p != ""]
+
+
+def _get_at(obj: Any, parts: list[str]) -> Any:
+    cur = obj
+    for p in parts:
+        if isinstance(cur, list):
+            try:
+                cur = cur[int(p)]
+            except (ValueError, IndexError):
+                return None
+        elif isinstance(cur, dict):
+            if p not in cur:
+                return None
+            cur = cur[p]
+        else:
+            return None
+    return cur
+
+
+def _set_at(obj: Any, parts: list[str], value: Any) -> None:
+    cur = obj
+    for p in parts[:-1]:
+        cur = cur[int(p)] if isinstance(cur, list) else cur[p]
+    last = parts[-1]
+    if isinstance(cur, list):
+        cur[int(last)] = value
+    else:
+        cur[last] = value
+
+
+def _numeric_leaves(kind: str, spec: dict[str, Any]) -> list[list[str]]:
+    """Every data-bearing number in a spec — the values that, if 'measured', need a
+    source. Editorial marks (annotation values) and UI-derived shares (statement
+    percent) are deliberately excluded."""
+    out: list[list[str]] = []
+
+    def num(v: Any) -> bool:
+        return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+    if kind == "kpi":
+        if num(spec.get("value")):
+            out.append(["value"])
+        comp = spec.get("comparison")
+        if isinstance(comp, dict) and num(comp.get("baseline")):
+            out.append(["comparison", "baseline"])
+        for j, v in enumerate(spec.get("sparkline") or []):
+            if num(v):
+                out.append(["sparkline", str(j)])
+    elif kind == "chart":
+        for i, s in enumerate(spec.get("series") or []):
+            for j, v in enumerate((s or {}).get("data") or []):
+                if num(v):
+                    out.append(["series", str(i), "data", str(j)])
+        for j, v in enumerate(spec.get("target") or []):
+            if num(v):
+                out.append(["target", str(j)])
+        for i, l in enumerate(spec.get("links") or []):
+            if num((l or {}).get("value")):
+                out.append(["links", str(i), "value"])
+        for i, h in enumerate(spec.get("hierarchy") or []):
+            if num((h or {}).get("value")):
+                out.append(["hierarchy", str(i), "value"])
+        for i, o in enumerate(spec.get("ohlc") or []):
+            for k in ("open", "high", "low", "close"):
+                if num((o or {}).get(k)):
+                    out.append(["ohlc", str(i), k])
+        for i, b in enumerate(spec.get("boxes") or []):
+            for k in ("min", "q1", "median", "q3", "max"):
+                if num((b or {}).get(k)):
+                    out.append(["boxes", str(i), k])
+        for i, c in enumerate(spec.get("calendar") or []):
+            if num((c or {}).get("value")):
+                out.append(["calendar", str(i), "value"])
+    elif kind == "statement":
+        for i, l in enumerate(spec.get("lines") or []):
+            if num((l or {}).get("value")):
+                out.append(["lines", str(i), "value"])
+    elif kind == "table":
+        for i, row in enumerate(spec.get("rows") or []):
+            for k, v in (row or {}).items():
+                if num(v):
+                    out.append(["rows", str(i), k])
+    return out
+
+
+def _covered(leaf: list[str], bound: list[list[str]]) -> bool:
+    return any(leaf[: len(bp)] == bp for bp in bound)
+
+
+async def _facts_by_id(conn, canvas_id, ids: list[str]) -> dict[str, Any]:
+    if not ids:
+        return {}
+    try:
+        uids = [uid(i) for i in ids]
+    except Exception:  # noqa: BLE001
+        return {}
+    rows = await conn.fetch(
+        "SELECT id, kind, value, points FROM canvas.facts WHERE canvas_id = $1 AND id = ANY($2::uuid[])",
+        uid(canvas_id),
+        uids,
+    )
+    return {str(r["id"]): r for r in rows}
+
+
+async def bind_and_materialize(
+    conn,
+    canvas_id,
+    kind: str,
+    spec: dict[str, Any],
+    bindings: list[dict[str, Any]] | None,
+    provenance: dict[str, Any] | None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Resolve each binding's fact value into the spec, then — if the widget claims
+    'measured' — require every number to be backed by a fact. Returns (spec, error)."""
+    bindings = bindings or []
+    facts = await _facts_by_id(conn, canvas_id, [b.get("factId") for b in bindings if b.get("factId")])
+    bound: list[list[str]] = []
+    for b in bindings:
+        fid, path = b.get("factId"), b.get("path")
+        if not fid or not path:
+            return None, "each binding needs a path and a factId"
+        fact = facts.get(str(fid))
+        if fact is None:
+            return None, f"binding fact {fid} is not a fact on this canvas"
+        parts = _norm_path(path)
+        if fact["kind"] == "series":
+            points = fact["points"] or []
+            ys = [p.get("y") for p in points]
+            target = _get_at(spec, parts)
+            if isinstance(target, dict) and "data" in target:
+                target["data"] = ys
+                xaxis = spec.get("xAxis") or {}
+                if not xaxis.get("categories"):
+                    spec.setdefault("xAxis", {})
+                    spec["xAxis"]["categories"] = [p.get("x") for p in points]
+            elif isinstance(target, list) or target is None:
+                _set_at(spec, parts, ys)
+            else:
+                return None, f'series binding path "{path}" must point at a series or an array'
+        else:
+            if _get_at(spec, parts) is None:
+                return None, f'binding path "{path}" does not resolve in the spec'
+            _set_at(spec, parts, fact["value"])
+        bound.append(parts)
+
+    if (provenance or {}).get("confidence") == "measured":
+        for leaf in _numeric_leaves(kind, spec):
+            if not _covered(leaf, bound):
+                return None, (
+                    f'"{".".join(leaf)}" is labelled measured but is not bound to a fact — '
+                    "web_search for it and bind it, or lower the widget's confidence."
+                )
+    return spec, None
+
+
 def size_for(kind: str, spec: Any) -> dict[str, int]:
     if kind == "chart":
         chart_type = (spec or {}).get("chartType")
@@ -132,16 +294,24 @@ async def apply_change_set(
                         if error:
                             errors.append(f'add_widget "{op.get("title")}": {error}')
                             continue
+                        bindings = op.get("bindings")
+                        spec, bind_error = await bind_and_materialize(
+                            conn, cid, widget_kind, spec, bindings, op.get("provenance")
+                        )
+                        if bind_error:
+                            errors.append(f'add_widget "{op.get("title")}": {bind_error}')
+                            continue
                         size = op.get("size") or size_for(widget_kind, spec)
                         x, y = await _next_slot(conn, cid, size["w"], size["h"])
                         widget_id = await conn.fetchval(
-                            """INSERT INTO canvas.widgets (canvas_id, kind, title, spec, provenance)
-                               VALUES ($1, $2, $3, $4, $5) RETURNING id""",
+                            """INSERT INTO canvas.widgets (canvas_id, kind, title, spec, provenance, bindings)
+                               VALUES ($1, $2, $3, $4, $5, $6) RETURNING id""",
                             cid,
                             widget_kind,
                             op.get("title"),
                             spec,
                             op.get("provenance"),
+                            bindings,
                         )
                         await conn.execute(
                             """INSERT INTO canvas.placements (canvas_id, widget_id, x, y, w, h)
@@ -169,20 +339,30 @@ async def apply_change_set(
                             errors.append(f'update_widget: {op.get("widgetId")} not found')
                             continue
                         spec = prev["spec"]
+                        bindings = op.get("bindings")
                         if op.get("spec") is not None:
                             spec, error = validate_spec(prev["kind"], op["spec"])
                             if error:
                                 errors.append(f'update_widget {op["widgetId"]}: invalid spec')
                                 continue
+                            spec, bind_error = await bind_and_materialize(
+                                conn, cid, prev["kind"], spec, bindings,
+                                op.get("provenance") or prev.get("provenance"),
+                            )
+                            if bind_error:
+                                errors.append(f'update_widget {op["widgetId"]}: {bind_error}')
+                                continue
                         await conn.execute(
                             """UPDATE canvas.widgets
                                SET title = $2, spec = $3, provenance = COALESCE($4, provenance),
+                                   bindings = COALESCE($5, bindings),
                                    current_version = current_version + 1, updated_at = now()
                                WHERE id = $1""",
                             wid,
                             op.get("title") or prev["title"],
                             spec,
                             op.get("provenance"),
+                            bindings,
                         )
                         applied.append({"operation": op, "widgetId": str(wid)})
                         inverse.append(
@@ -264,23 +444,48 @@ async def apply_change_set(
                         added_names = [s.get("name") for s in new_series]
                         merged_series = list(prev_spec.get("series") or [])
                         # Skip names that already exist — an idempotent merge, not a duplicator.
+                        # factIds ride alongside series so a bound fact survives the filter.
+                        fact_ids = op.get("factIds") or []
                         existing = {s.get("name") for s in merged_series}
-                        appended = [s for s in new_series if s.get("name") not in existing]
-                        if not appended:
+                        pairs = [
+                            (s, fact_ids[i] if i < len(fact_ids) else None)
+                            for i, s in enumerate(new_series)
+                            if s.get("name") not in existing
+                        ]
+                        if not pairs:
                             errors.append(
                                 f'add_chart_series: series {added_names} already on the chart'
                             )
                             continue
+                        appended = [s for s, _ in pairs]
+                        base = len(merged_series)
                         prev_spec["series"] = merged_series + appended
                         spec, error = validate_spec("chart", prev_spec)
                         if error:
                             errors.append(f'add_chart_series: {error}')
                             continue
+                        new_bindings = [
+                            {"path": f"series.{base + i}", "factId": f}
+                            for i, (_, f) in enumerate(pairs)
+                            if f
+                        ]
+                        if new_bindings:
+                            spec, bind_error = await bind_and_materialize(
+                                conn, cid, "chart", spec, new_bindings, None
+                            )
+                            if bind_error:
+                                errors.append(f"add_chart_series: {bind_error}")
+                                continue
+                        prior_bindings = (
+                            await conn.fetchval("SELECT bindings FROM canvas.widgets WHERE id = $1", wid)
+                            or []
+                        )
                         await conn.execute(
                             """UPDATE canvas.widgets
-                               SET spec = $2, current_version = current_version + 1, updated_at = now()
+                               SET spec = $2, bindings = $3,
+                                   current_version = current_version + 1, updated_at = now()
                                WHERE id = $1""",
-                            wid, spec,
+                            wid, spec, prior_bindings + new_bindings,
                         )
                         applied.append({"operation": op, "widgetId": str(wid)})
                         inverse.append(

@@ -8,7 +8,7 @@ import { Settings } from "./Settings";
 import { useTheme } from "./ThemeContext";
 import { buildEntityColors } from "./entities";
 import { FilterProvider } from "./FilterContext";
-import type { CanvasState, CanvasStyle } from "./types";
+import type { CanvasState, CanvasStyle, Fact } from "./types";
 
 interface CanvasListItem {
   id: string;
@@ -26,7 +26,8 @@ const PROMPTS = [
 
 function CanvasView({ canvasId, onTitle }: { canvasId: string; onTitle: (t: string) => void }) {
   const [state, setState] = useState<CanvasState>({ canvas: null, widgets: [] });
-  const { chart: chartTheme } = useTheme();
+  const [facts, setFacts] = useState<Record<string, Fact>>({});
+  const { chart: chartTheme, mode } = useTheme();
   const [railOpen, setRailOpen] = useState(true);
   const [input, setInput] = useState("");
   const [initial, setInitial] = useState<UIMessage[] | null>(null);
@@ -37,6 +38,14 @@ function CanvasView({ canvasId, onTitle }: { canvasId: string; onTitle: (t: stri
     const next: CanvasState = await res.json();
     setState(next);
     if (next.canvas) onTitle(next.canvas.title);
+    fetch(`/api/canvases/${canvasId}/facts`)
+      .then((r) => r.json())
+      .then((rows: Fact[]) => {
+        const map: Record<string, Fact> = {};
+        for (const f of rows) map[f.factId] = f;
+        setFacts(map);
+      })
+      .catch(() => {});
   }, [canvasId, onTitle]);
 
   useEffect(() => {
@@ -164,14 +173,21 @@ function CanvasView({ canvasId, onTitle }: { canvasId: string; onTitle: (t: stri
     mono: "ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace",
     sans: "system-ui, -apple-system, 'Segoe UI', sans-serif",
   };
-  const PAPER: Record<string, string> = {
-    default: "", cream: "#faf6ec", cool: "#f2f5f8", sage: "#f2f6f1", blush: "#f9f3f1",
+  // Paper tint is mode-aware: a light paper in dark mode would fight the theme
+  // (topbar and cards stay dark while the board goes light), so each has a dark twin.
+  const PAPER: Record<string, { light: string; dark: string }> = {
+    default: { light: "", dark: "" },
+    cream: { light: "#faf6ec", dark: "#131109" },
+    cool: { light: "#f2f5f8", dark: "#0b0d11" },
+    sage: { light: "#f2f6f1", dark: "#0b0e0b" },
+    blush: { light: "#f9f3f1", dark: "#120d0c" },
   };
+  const paper = style ? PAPER[style.paper]?.[mode] : "";
   const styleVars = style
     ? ({
         ...(style.accent ? { "--accent": style.accent, "--accent-ink": style.accent, "--accent-wash": `${style.accent}1c` } : {}),
         "--display": DISPLAY[style.type] ?? DISPLAY.sans,
-        ...(PAPER[style.paper] ? { "--page": PAPER[style.paper], "--page-2": PAPER[style.paper] } : {}),
+        ...(paper ? { "--page": paper, "--page-2": paper } : {}),
       } as React.CSSProperties)
     : undefined;
 
@@ -186,11 +202,16 @@ function CanvasView({ canvasId, onTitle }: { canvasId: string; onTitle: (t: stri
         {empty && !busy && (
           <div className="board-empty">
             <div className="board-empty-inner">
-              <p className="hint">This canvas is empty. Ask for something.</p>
+              <div className="empty-mark" aria-hidden>◈</div>
+              <h2 className="empty-title">A blank canvas.</h2>
+              <p className="hint">
+                Ask a question and the answer arrives composed — charts, metrics, and notes you can rearrange.
+              </p>
               <div className="seeds">
                 {PROMPTS.map((p) => (
                   <button key={p} onClick={() => send(p)}>
                     {p}
+                    <span className="seed-arrow" aria-hidden>→</span>
                   </button>
                 ))}
               </div>
@@ -205,6 +226,7 @@ function CanvasView({ canvasId, onTitle }: { canvasId: string; onTitle: (t: stri
         <Canvas
           widgets={state.widgets}
           entities={entities}
+          facts={facts}
           revealY={revealY}
           onLayoutChange={applyOps}
           onRemove={(widgetId) => applyOps([{ kind: "remove_widget", widgetId }])}
@@ -269,6 +291,34 @@ function CanvasView({ canvasId, onTitle }: { canvasId: string; onTitle: (t: stri
       </div>
     </div>
     </FilterProvider>
+  );
+}
+
+const ICON = { width: 15, height: 15, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round", strokeLinejoin: "round" } as const;
+
+function SunIcon() {
+  return (
+    <svg {...ICON} aria-hidden>
+      <circle cx="12" cy="12" r="4.2" />
+      <path d="M12 2.4v2.4M12 19.2v2.4M4.22 4.22l1.7 1.7M18.08 18.08l1.7 1.7M2.4 12h2.4M19.2 12h2.4M4.22 19.78l1.7-1.7M18.08 5.92l1.7-1.7" />
+    </svg>
+  );
+}
+
+function MoonIcon() {
+  return (
+    <svg {...ICON} aria-hidden>
+      <path d="M20.5 14.2A8.2 8.2 0 1 1 10.3 3.7a6.4 6.4 0 0 0 10.2 10.5Z" />
+    </svg>
+  );
+}
+
+function GearIcon() {
+  return (
+    <svg {...ICON} aria-hidden>
+      <circle cx="12" cy="12" r="3.1" />
+      <path d="M19.4 13.5a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 0 1-4 0v-.09A1.7 1.7 0 0 0 8.4 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.03H2.4a2 2 0 0 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.4a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1.03-1.56V2.4a2 2 0 0 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9a1.7 1.7 0 0 0 1.56 1.03h.09a2 2 0 0 1 0 4h-.09a1.7 1.7 0 0 0-1.56 1.03Z" />
+    </svg>
   );
 }
 
@@ -342,10 +392,10 @@ export default function App() {
             title={mode === "dark" ? "Switch to light" : "Switch to dark"}
             onClick={() => set({ mode: mode === "dark" ? "light" : "dark" })}
           >
-            {mode === "dark" ? "☀" : "☾"}
+            {mode === "dark" ? <SunIcon /> : <MoonIcon />}
           </button>
           <button className="icon" title="Settings" onClick={() => setSetOpen(true)}>
-            ⚙
+            <GearIcon />
           </button>
           <button onClick={() => active && fetch(`/api/canvases/${active}/undo`, { method: "POST" })}>undo</button>
           <button className="primary" onClick={create}>
