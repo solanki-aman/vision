@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { Fact } from "./types";
 
 function fmtNum(v?: number | null): string {
@@ -122,22 +122,55 @@ export function ProvBadge({
   facts,
   all,
   headline,
+  claimFacts = [],
 }: {
   facts: Fact[];
   all: Record<string, Fact>;
   /** The formatted value, shown at the top of the modal (e.g. the KPI number). */
   headline?: string;
+  /** Facts the widget's title/prose was written from — sources for a claim, not a value. */
+  claimFacts?: Fact[];
 }) {
   const [open, setOpen] = useState(false);
+  const titleId = useId();
+  const trigger = useRef<HTMLButtonElement>(null);
+  const dialog = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setOpen(false);
+        return;
+      }
+      // Keep Tab inside the dialog while it's up, so keyboard users don't
+      // wander into the canvas behind it.
+      if (e.key !== "Tab" || !dialog.current) return;
+      const focusable = dialog.current.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // Move focus in on open, and hand it back to the (i) on close.
+    const previous = document.activeElement as HTMLElement | null;
+    dialog.current?.querySelector<HTMLElement>(".dd-close")?.focus();
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      (previous ?? trigger.current)?.focus?.();
+    };
   }, [open]);
 
-  if (!facts.length) return null;
+  if (!facts.length && !claimFacts.length) return null;
 
   const worst =
     facts.some((f) => f.confidence === "illustrative")
@@ -145,13 +178,26 @@ export function ProvBadge({
       : facts.some((f) => f.confidence === "estimated")
         ? "estimated"
         : "measured";
-  const badge = facts.every((f) => f.tool === "code_execution") ? "computed" : worst;
+  // A widget with no bound numbers is here for its claim alone — don't let
+  // `every()` on an empty list report it as "computed".
+  const badge = !facts.length
+    ? "sourced"
+    : facts.every((f) => f.tool === "code_execution")
+      ? "computed"
+      : worst;
   const single = facts.length === 1;
-  const value = headline ?? (single ? withUnit(facts[0].value, facts[0].unit) : "Provenance");
+  const value =
+    headline ?? (single ? withUnit(facts[0].value, facts[0].unit) : "Provenance");
 
   return (
     <span className="prov-i-wrap">
-      <button className="prov-i" aria-label="How we got this number" onClick={() => setOpen(true)}>
+      <button
+        ref={trigger}
+        className="prov-i"
+        aria-label="How we got this number"
+        aria-haspopup="dialog"
+        onClick={() => setOpen(true)}
+      >
         <svg viewBox="0 0 24 24" width={13} height={13} fill="none" stroke="currentColor" strokeWidth={1.7} aria-hidden>
           <circle cx="12" cy="12" r="9" />
           <path d="M12 11v5" strokeLinecap="round" />
@@ -160,10 +206,19 @@ export function ProvBadge({
       </button>
       {open && (
         <div className="dd-overlay" onClick={() => setOpen(false)}>
-          <div className="dd-modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="dd-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={titleId}
+            ref={dialog}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="dd-head">
               <div className="dd-head-main">
-                <div className="dd-value">{value}</div>
+                <div className="dd-value" id={titleId}>
+                  {value}
+                </div>
                 <div className="dd-sub">how this number was made</div>
               </div>
               <span className={`prov-badge prov-badge-${badge}`}>{badge}</span>
@@ -175,6 +230,18 @@ export function ProvBadge({
               {facts.map((f) => (
                 <FactBlock key={f.factId} f={f} all={all} titled={!single} />
               ))}
+              {claimFacts.length > 0 && (
+                <div className="dd-block">
+                  <div className="dd-section">
+                    <div className="dd-section-head">
+                      <SearchIcon /> the claim rests on
+                    </div>
+                    {claimFacts.map((f) => (
+                      <InputRow key={f.factId} name={f.entity ?? "fact"} fact={f} />
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>

@@ -85,6 +85,8 @@ export interface Widget {
   spec: ChartSpec | KpiSpec | TableSpec | NarrativeSpec | ImageSpec | LabelSpec | StatementSpec | HeroSpec;
   provenance: Provenance | null;
   bindings?: Binding[] | null;
+  /** Fact ids this widget's title/prose was written from — provenance for claims. */
+  authoredFrom?: string[] | null;
   x: number;
   y: number;
   w: number;

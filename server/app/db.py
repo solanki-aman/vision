@@ -175,6 +175,9 @@ async def init_db() -> None:
         await conn.execute(SCHEMA)
         await conn.execute("ALTER TABLE canvas.canvases ADD COLUMN IF NOT EXISTS style JSONB")
         await conn.execute("ALTER TABLE canvas.widgets ADD COLUMN IF NOT EXISTS bindings JSONB")
+        # A title or narrative is the model's CLAIM, not a retrieved figure — it gets a
+        # softer provenance than a bound number: the facts it was written from.
+        await conn.execute("ALTER TABLE canvas.widgets ADD COLUMN IF NOT EXISTS authored_from JSONB")
         await conn.execute("ALTER TABLE canvas.facts ADD COLUMN IF NOT EXISTS inputs JSONB")
         # created_at is transaction-start time in Postgres, so every row a single
         # save_messages() call writes shares one timestamp — a user prompt and its
@@ -243,8 +246,8 @@ async def rename_canvas_if_untitled(canvas_id: Any, title: str) -> None:
 async def get_canvas_state(canvas_id: Any) -> dict[str, Any]:
     cid = uid(canvas_id)
     widgets = await pool().fetch(
-        """SELECT w.id, w.kind, w.title, w.spec, w.provenance, w.bindings, w.current_version,
-                  p.x, p.y, p.w, p.h
+        """SELECT w.id, w.kind, w.title, w.spec, w.provenance, w.bindings,
+                  w.authored_from AS "authoredFrom", w.current_version, p.x, p.y, p.w, p.h
            FROM canvas.widgets w
            LEFT JOIN canvas.placements p ON p.widget_id = w.id
            WHERE w.canvas_id = $1 AND w.status = 'active'

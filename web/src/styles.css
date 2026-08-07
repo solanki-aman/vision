@@ -418,6 +418,9 @@ body {
 .prov-measured .prov-dot { background: #0ca30c; }
 .prov-estimated .prov-dot { background: #fab219; }
 .prov-illustrative .prov-dot { background: var(--faint); }
+/* claims measured, but no fact stands behind it — a hollow dot, not a green one */
+.prov-unverified .prov-dot { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); }
+.prov-unverified .prov-text { font-style: italic; }
 
 /* provenance (i) affordance + timeline popover */
 .prov-i-wrap { display: inline-flex; }
@@ -448,6 +451,7 @@ body {
 .prov-badge-measured { background: rgba(12, 163, 12, 0.13); color: #0ca30c; }
 .prov-badge-estimated { background: rgba(250, 178, 25, 0.16); color: #b07d10; }
 .prov-badge-computed { background: var(--accent-wash); color: var(--accent-ink); }
+.prov-badge-sourced { background: var(--hover); color: var(--ink-2); }
 .prov-badge-illustrative { background: var(--hover); color: var(--muted); }
 
 /* provenance drill-down modal */

@@ -51,6 +51,14 @@ or "illustrative" — those bypass binding; never dress an invented number as
 "measured". When the user says "add X to the comparison", call add_chart_series with
 the new series and its `factIds`, so the added line carries its own provenance.
 
+Your words get provenance too, in a softer form. A title like "Freight cost
+doubled while volume grew 9%" is a claim you are making about the data, not a
+figure you retrieved, so it cannot bind to one value. Pass `authoredFrom` — the
+factIds the claim rests on — on any widget whose title or prose makes an
+argument from searched numbers. A reader can then check your sentence against
+the same facts you wrote it from. Narratives especially: if you assert it, cite
+what it came from.
+
 Derived numbers get lineage too. Do not work out a growth rate, ratio, share or
 total in your head — call code_execution with the input factIds and Python that
 assigns `result`. Name each input variable meaningfully (`q1_rev`, not `x`) and

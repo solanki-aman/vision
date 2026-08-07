@@ -304,14 +304,16 @@ async def apply_change_set(
                         size = op.get("size") or size_for(widget_kind, spec)
                         x, y = await _next_slot(conn, cid, size["w"], size["h"])
                         widget_id = await conn.fetchval(
-                            """INSERT INTO canvas.widgets (canvas_id, kind, title, spec, provenance, bindings)
-                               VALUES ($1, $2, $3, $4, $5, $6) RETURNING id""",
+                            """INSERT INTO canvas.widgets
+                                 (canvas_id, kind, title, spec, provenance, bindings, authored_from)
+                               VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id""",
                             cid,
                             widget_kind,
                             op.get("title"),
                             spec,
                             op.get("provenance"),
                             bindings,
+                            op.get("authoredFrom"),
                         )
                         await conn.execute(
                             """INSERT INTO canvas.placements (canvas_id, widget_id, x, y, w, h)
@@ -356,6 +358,7 @@ async def apply_change_set(
                             """UPDATE canvas.widgets
                                SET title = $2, spec = $3, provenance = COALESCE($4, provenance),
                                    bindings = COALESCE($5, bindings),
+                                   authored_from = COALESCE($6, authored_from),
                                    current_version = current_version + 1, updated_at = now()
                                WHERE id = $1""",
                             wid,
@@ -363,6 +366,7 @@ async def apply_change_set(
                             spec,
                             op.get("provenance"),
                             bindings,
+                            op.get("authoredFrom"),
                         )
                         applied.append({"operation": op, "widgetId": str(wid)})
                         inverse.append(
