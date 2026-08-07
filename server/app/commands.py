@@ -896,11 +896,18 @@ async def normalize_rows(canvas_id: Any) -> int:
 
 
 async def undo_last(canvas_id: Any) -> ApplyResult | None:
-    """Undo is a new change set of stored inverse operations — history is never deleted (plan §2.8)."""
+    """Undo is a new change set of stored inverse operations — history is never deleted (plan §2.8).
+
+    That new change set is itself applied and carries its own inverse, so it must never
+    become the *next* undo's target: otherwise a second consecutive undo would just redo
+    what the first one removed. Undo targets real edits only (`origin <> 'undo'`), which
+    is what lets repeated undo walk back through the stack.
+    """
     cid = uid(canvas_id)
     row = await pool().fetchrow(
         """SELECT id, inverse FROM canvas.change_sets
-           WHERE canvas_id = $1 AND status = 'applied' AND undone = false AND inverse IS NOT NULL
+           WHERE canvas_id = $1 AND status = 'applied' AND undone = false
+             AND inverse IS NOT NULL AND origin <> 'undo'
            ORDER BY created_at DESC LIMIT 1""",
         cid,
     )
