@@ -198,6 +198,10 @@ export function Canvas({ widgets, entities, facts, revealY, onLayoutChange, onRe
             className={`grid-stack-item-content widget kind-${w.kind} ${fresh.has(w.id) ? "arriving" : ""} ${
               revealY !== null && (w.y ?? 0) > revealY ? "unrevealed" : ""
             }`}
+            // Each widget is a landmark a screen-reader user can jump between, named
+            // by its own title — the canvas is a document, so give it structure.
+            role="group"
+            aria-label={w.title}
           >
             {w.kind !== "label" && w.kind !== "hero" && (
             <header className="widget-grip">

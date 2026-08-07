@@ -14,7 +14,57 @@ function factAt(bindings: Binding[] | null | undefined, facts: Record<string, Fa
   return b ? facts[b.factId] : undefined;
 }
 
-function Chart({ spec, widgetId, entities }: { spec: ChartSpec; widgetId: string; entities: Record<string, string> }) {
+/** ECharts paints into a <canvas>, which is nothing at all to a screen reader.
+ * Describe the chart in words, and put the numbers in a real table beside it so
+ * the data itself is reachable — not just a label saying a chart exists. */
+function chartSummary(spec: ChartSpec, title: string): string {
+  const kind = (spec.chartType ?? "chart").replace(/_/g, " ");
+  const cats = spec.xAxis?.categories ?? [];
+  const series = spec.series ?? [];
+  const parts = [`${kind} chart.`, title];
+  if (cats.length) {
+    parts.push(`${cats.length} categories from ${cats[0]} to ${cats[cats.length - 1]}.`);
+  }
+  if (series.length) {
+    parts.push(`${series.length} series: ${series.map((s) => s.name).join(", ")}.`);
+  }
+  if (spec.yAxis?.unit) parts.push(`Values in ${spec.yAxis.unit}.`);
+  return parts.filter(Boolean).join(" ");
+}
+
+/** The chart's numbers as a table, visually hidden but available to assistive tech. */
+function ChartTable({ spec, title }: { spec: ChartSpec; title: string }) {
+  const cats = spec.xAxis?.categories ?? [];
+  const series = (spec.series ?? []).filter((s) => (s.data ?? []).length);
+  if (!cats.length || !series.length) return null;
+  return (
+    <table className="sr-only">
+      <caption>{title} — data table</caption>
+      <thead>
+        <tr>
+          <th scope="col">{spec.xAxis?.label ?? "Category"}</th>
+          {series.map((s) => (
+            <th key={s.name} scope="col">
+              {s.name}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {cats.map((c, i) => (
+          <tr key={c}>
+            <th scope="row">{c}</th>
+            {series.map((s) => (
+              <td key={s.name}>{s.data?.[i] ?? "no data"}</td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function Chart({ spec, widgetId, entities, title = "" }: { spec: ChartSpec; widgetId: string; entities: Record<string, string>; title?: string }) {
   const { chart: theme, animate } = useTheme();
   const { windows } = useFilters();
   const view = applyWindow(spec, windows[widgetId]);
@@ -60,7 +110,12 @@ function Chart({ spec, widgetId, entities }: { spec: ChartSpec; widgetId: string
     return () => node.removeEventListener("vision:replay", replay);
   }, [view, theme, entities]);
 
-  return <div className="chart-mount" ref={el} />;
+  return (
+    <>
+      <div className="chart-mount" ref={el} role="img" aria-label={chartSummary(view, title)} />
+      <ChartTable spec={view} title={title} />
+    </>
+  );
 }
 
 function fmt(n: number) {
@@ -227,7 +282,14 @@ export function WidgetBody({
 }) {
   switch (widget.kind) {
     case "chart":
-      return <Chart spec={widget.spec as ChartSpec} widgetId={widget.id} entities={entities} />;
+      return (
+        <Chart
+          spec={widget.spec as ChartSpec}
+          widgetId={widget.id}
+          entities={entities}
+          title={widget.title}
+        />
+      );
     case "label":
       return <Label spec={widget.spec as LabelSpec} />;
     case "statement":
