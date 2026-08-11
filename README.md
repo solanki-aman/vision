@@ -116,6 +116,116 @@ picked from a catalog.
 
 ---
 
+## Home: a standing brief, kept current
+
+A canvas answers one question and is done. **Home** is the opposite surface — the
+small set of answers you want standing when you arrive, kept current without asking,
+plus whatever the agent noticed while you were away. It's the default landing page and
+it's built for a CFO's glance: dense, quick to read, and every number entitlement-aware.
+
+![The Home screen: financial pulse, an attention feed, and pinned tiles](screenshots/home-cockpit.png)
+
+<sub>Three bands, top to bottom. **Financial Pulse** — headline metrics (revenue, gross margin, operating income, bookings) each with a trailing-quarter delta and a 12-month sparkline, computed live from the warehouse *as the caller*. The gross-margin sparkline cliffs at the end: an actual cost shock, surfaced without a click. **Needs your attention** — the agent's findings, folded in (below). **Pinned sections** — the tiles you kept; empty sections collapse into one compact strip rather than six empty blocks.</sub>
+
+Everything on Home is real and access-checked. The pulse runs a warehouse query under
+the viewer's own entitlements, so a US-only analyst sees a US-only pulse and is told
+which regions were withheld — a count, never the names. Full design in
+[`home-screen-design.md`](home-screen-design.md).
+
+### Pin any tile, and it keeps itself current
+
+Pinning a widget references it — it never copies it. The pin modal asks two things and
+*reports* two more, because offering a daily refresh on a number that physically cannot
+move is the kind of quiet lie that makes people stop trusting a dashboard.
+
+![The pin-to-Home modal: section, cadence, watch condition, and the honest report](screenshots/pin-dialog.png)
+
+<sub>**Asks:** which section, and a refresh cadence — clock, fiscal-calendar, or event
+(market open/close, before/after earnings, on a new filing, *on source update*).
+**Reports:** how many of the tile's numbers are actually re-runnable versus frozen, and
+the share mode — derived from the data's access class, never chosen. A warehouse tile
+"shares live: recipients see their own entitled data"; a web-search tile shares as a
+snapshot, because a public figure has no per-viewer answer.</sub>
+
+The two settings are deliberately separate: cadence is *when to look*, the watch
+condition is *when to speak*. A tile can poll hourly and speak once a quarter.
+
+### What lands in your inbox
+
+Home has an **ambient agent** behind it — a worker that refreshes your pins on their
+schedules and, when a number actually moves, decides whether it's worth telling you.
+Most of it costs nothing: a refresh is plain SQL, and only a change past a gate keyed to
+the figure's *own* volatility ever escalates to a model call. What comes out is a typed
+**finding**, and where it goes depends on whether it's *about* your data or *addressed
+to you*:
+
+```mermaid
+flowchart TD
+  T["trigger — schedule · data event · watch condition"] --> R0["rung 0 · refresh<br/>(SQL, no model)"]
+  R0 --> G{"moved past the<br/>volatility gate?"}
+  G -->|no| Q["freshness bumped<br/>· zero model cost"]
+  G -->|yes| R1["rung 1 · notice<br/>(one bounded model call)"]
+  R1 --> K{"interaction"}
+  K -->|notify| Bud{"clears the daily<br/>brief budget?"}
+  Bud -->|yes| Brief["Morning brief / attention<br/>— a Signal to glance at"]
+  Bud -->|no| Tile["attaches to its tile<br/>— 'changed since you looked'"]
+  K -->|question| Inbox["Inbox — needs an answer"]
+  K -->|review| Inbox
+```
+
+The **inbox holds only what needs a decision from you** — the two interactions addressed
+to a person:
+
+- **Question** — the agent hit genuine ambiguity and asking beats guessing. *"The
+  warehouse renamed a dimension — is `DE` the same series as `EMEA-DE`?"* A wrong guess
+  would silently corrupt the Germany trend; the question costs one interrupt.
+- **Review** — the agent has a proposal waiting for approval, like a draft dashboard
+  composed from a finding you opened. Nothing it builds lands on Home unreviewed.
+
+Everything else is a **notify** finding — something *moved* (`moved`, `crossed`) or
+something is *wrong or missing* (`broke`, `stale`, `absent`). Those are about your data,
+not addressed to you, so they never enter the inbox. The strongest one of the day clears
+a hard budget (default three) and appears in the brief as a **Signal**; the rest attach
+to the tile they're about, which carries a "changed since you last looked" marker.
+Nothing is lost, and the inbox can actually reach zero — which is the whole point of
+separating the queue from the feed. `stale` and `absent` matter most here: *nothing
+happened when something should have* — month-close data that never landed — is the
+failure a human staring at a dashboard is worst at catching.
+
+Findings are **personal**. One is computed from a specific person's data under their
+entitlements, so it never travels: open a section someone shared and you get your own
+tiles resolved to your access, not their findings about regions you can't see. The full
+ladder, the interrupt budget, and the research behind it (LangChain's ambient agents,
+the ProAct / PROBE papers on when to act versus stay silent) are in
+[`ambient-agent-design.md`](ambient-agent-design.md).
+
+### Where it runs
+
+The ambient agent is a separate `worker` process — the only one that makes an ambient
+model call, so the kill switch is `docker compose stop worker` and its cost is
+attributable to one place. It claims due pins with `FOR UPDATE SKIP LOCKED` (the same
+pattern that survives a deploy landing mid-job for document ingest) and reaches open
+browser tabs through Postgres `LISTEN/NOTIFY` — no Redis. It's **off by default**
+(`AMBIENT_ENABLED`), following the same precedent as auth: a capability that spends money
+with no human present is switched on deliberately.
+
+```mermaid
+flowchart LR
+  subgraph compose
+    W["worker · NEW<br/>ambient loop<br/>no HTTP port"]
+    S["server<br/>FastAPI + SSE"]
+  end
+  PG[("postgres<br/>canvas · home · finance · ambient")]
+  X(["xAI Grok"])
+  W -->|"claim due pins · SKIP LOCKED"| PG
+  W -->|"pg_notify('canvas_changed')"| PG
+  W -->|"ambient calls only"| X
+  S -->|"LISTEN → fan out to open tabs"| PG
+  S -->|"interactive turns"| X
+```
+
+---
+
 ## Architecture
 
 The best way to explain the architecture is to let the system explain itself. This is a Vision canvas about Vision — same tools, same command layer, same palette adapter as any other canvas:
@@ -329,6 +439,14 @@ The five typed operations `/commands` accepts are `add_widget`,
 `update_widget`, `remove_widget`, `move_widget`, `resize_widget`. Same set for
 the agent and for GridStack.
 
+The **Home** surface adds its own group under `/api/home` — `GET /api/home`
+(sections, pins, and the attention feed as the caller), `GET /api/home/pulse`
+(the entitlement-aware financial glance), `POST /api/home/pins` and
+`GET /api/home/pin-preview` (the pin modal's honest report), per-viewer
+`…/pins/{id}/refresh`, section grants, and finding dismiss/act — plus a
+`warehouse_query` agent tool that produces entitled, re-executable facts. All of
+it is access-checked from the server-side session, never a client header.
+
 ## Run
 
 ```bash
@@ -378,6 +496,14 @@ above — `scripts/shoot-ui.mjs` captures the full viewport instead:
 
 ```bash
 cd web && node scripts/shoot-ui.mjs ../screenshots
+```
+
+`scripts/shoot-home.mjs` captures the Home screen (light and dark) and the
+pin-to-Home modal, which is where the `home-cockpit.png` and `pin-dialog.png`
+above come from:
+
+```bash
+cd web && node scripts/shoot-home.mjs ../screenshots
 ```
 
 ### Tests
@@ -438,6 +564,18 @@ approval tokens for risky change sets. This prototype implements its
 load-bearing ideas: artifact/placement split, typed change sets with inverse
 operations, append-only versions and audit, the spec→renderer boundary,
 server-generated GridStack placements, SSE progress, provenance disclosure,
-and the compact canvas summary handed to the agent each turn. It deliberately
-omits the multi-tenant parts. If you want to know what the productionised
-version looks like, read §7 of that document.
+and the compact canvas summary handed to the agent each turn.
+
+The **Home / ambient** layer above carries several of that document's later
+chapters out of "omitted" and into the running system: an entitlement-aware data
+layer over a mock warehouse (`finance.*`), re-executable query recipes so a tile
+can refresh and resolve per viewer, Home pins with clock/fiscal/event schedules,
+section-level sharing under delegated access, and the ambient agent with its
+interrupt budget and inbox. Their design is written down in
+[`home-screen-design.md`](home-screen-design.md) and
+[`ambient-agent-design.md`](ambient-agent-design.md), each with the decisions
+(`D-0`…`D-9`) settled and the trade-offs recorded. Still omitted: true
+multi-tenancy, the LangGraph-Server cutover (the graph is
+[export-ready](server/langgraph.json) but the live runtime is still in-process),
+and the productionised connector gateway. If you want to know what the fully
+productionised version looks like, read §7 of the architecture document.
