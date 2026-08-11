@@ -11,6 +11,7 @@ import json
 import logging
 from typing import Any
 
+from langsmith import traceable
 from xai_sdk.chat import user
 from xai_sdk.tools import web_search, x_search
 
@@ -59,9 +60,13 @@ def _extract_json(text: str) -> dict[str, Any]:
         return {}
 
 
+# Search runs on the raw xai-sdk, outside LangChain, so it would otherwise be a
+# blind spot in the trace — and it is usually the slowest step in a turn. The
+# decorator is inert when tracing is off.
+@traceable(run_type="retriever", name="web_search")
 async def run_search(query: str) -> dict[str, Any]:
     chat = client().chat.create(
-        model=settings.xai_model,
+        model=settings.search_model,
         tools=[web_search(), x_search()],
         store_messages=False,
     )

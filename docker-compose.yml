@@ -15,12 +15,57 @@ services:
       timeout: 5s
       retries: 10
 
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: vision
+      MINIO_ROOT_PASSWORD: vision-secret
+    ports:
+      - "9000:9000"
+      - "9001:9001"  # console, for looking at what got stored
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   server:
     build: ./server
     environment:
       DATABASE_URL: postgres://vision:vision@postgres:5432/vision
+      # Document bytes and page renders. Never exposed as presigned URLs — every
+      # read goes through an endpoint that has resolved the caller's grant first.
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: vision
+      MINIO_SECRET_KEY: vision-secret
+      MINIO_BUCKET: documents
+      DOC_IMAGE_BUDGET: ${DOC_IMAGE_BUDGET:-}
+      DOC_PAGE_DPI: ${DOC_PAGE_DPI:-}
+      DOC_SHEET_DPI: ${DOC_SHEET_DPI:-}
+      DOC_READ_DPI: ${DOC_READ_DPI:-}
+      # AUTH_MODE=oidc|disabled. Unset derives it from OIDC_ISSUER, which is how a
+      # laptop runs it — as a single local principal, and an open document store the
+      # moment the port is reachable. AUTH_MODE=oidc without a configured issuer
+      # refuses to start rather than serving unauthenticated.
+      AUTH_MODE: ${AUTH_MODE:-}
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_REDIRECT_URL: ${OIDC_REDIRECT_URL:-}
+      OIDC_POST_LOGOUT_URL: ${OIDC_POST_LOGOUT_URL:-}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-}
       XAI_API_KEY: ${XAI_API_KEY:-}
       XAI_MODEL: ${XAI_MODEL:-grok-4.5}
+      XAI_REASONING_EFFORT: ${XAI_REASONING_EFFORT:-low}
+      XAI_SEARCH_MODEL: ${XAI_SEARCH_MODEL:-}
+      # LangSmith reads these itself; unset LANGSMITH_TRACING to turn tracing off.
+      LANGSMITH_TRACING: ${LANGSMITH_TRACING:-}
+      LANGSMITH_ENDPOINT: ${LANGSMITH_ENDPOINT:-https://api.smith.langchain.com}
+      LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
+      LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-vision}
       PORT: 3001
       SHOOTER_URL: http://shooter:3002
     ports:
@@ -28,8 +73,14 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      minio:
+        condition: service_healthy
     volumes:
       - ./server/app:/app/app
+      # Mounted so `docker compose exec server pytest` runs the tests in the
+      # same environment the service itself runs in.
+      - ./server/tests:/app/tests
+      - ./server/pytest.ini:/app/pytest.ini
 
   shooter:
     build: ./shooter
@@ -37,6 +88,10 @@ services:
       WEB_URL: http://web:5173
     ports:
       - "3002:3002"
+    volumes:
+      # Mounted like ./server/app and ./web/src, so a renderer change only needs
+      # `docker compose restart shooter` rather than an image rebuild.
+      - ./shooter/index.mjs:/app/index.mjs
     depends_on:
       - web
 
@@ -55,3 +110,4 @@ services:
 
 volumes:
   pgdata:
+  miniodata:

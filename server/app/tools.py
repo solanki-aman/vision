@@ -83,6 +83,16 @@ BINDINGS_FIELD = Field(
     ),
 )
 
+AUTHORED_FROM_FIELD = Field(
+    default=None,
+    description=(
+        "The factIds this widget's WORDS rest on — its title, and any prose in it. A claim like "
+        "'Freight cost doubled while volume grew 9%' is your reading of the data, not a retrieved "
+        "figure, so it cannot be bound to one value; list the facts you drew it from instead and a "
+        "reader can check the claim against them."
+    ),
+)
+
 
 class ChartInput(ToolInput):
     title: str = TITLE_FIELD
@@ -90,6 +100,7 @@ class ChartInput(ToolInput):
     size: Size | None = SIZE_FIELD
     spec: ChartSpec
     bindings: list[Binding] | None = BINDINGS_FIELD
+    authoredFrom: list[str] | None = AUTHORED_FROM_FIELD
 
 
 class KpiInput(ToolInput):
@@ -98,6 +109,7 @@ class KpiInput(ToolInput):
     size: Size | None = SIZE_FIELD
     spec: KpiSpec
     bindings: list[Binding] | None = BINDINGS_FIELD
+    authoredFrom: list[str] | None = AUTHORED_FROM_FIELD
 
 
 class TableInput(ToolInput):
@@ -106,6 +118,7 @@ class TableInput(ToolInput):
     size: Size | None = SIZE_FIELD
     spec: TableSpec
     bindings: list[Binding] | None = BINDINGS_FIELD
+    authoredFrom: list[str] | None = AUTHORED_FROM_FIELD
 
 
 class NarrativeInput(ToolInput):
@@ -113,6 +126,7 @@ class NarrativeInput(ToolInput):
     provenance: Provenance
     size: Size | None = SIZE_FIELD
     spec: NarrativeSpec
+    authoredFrom: list[str] | None = AUTHORED_FROM_FIELD
 
 
 class StatementInput(ToolInput):
@@ -121,6 +135,7 @@ class StatementInput(ToolInput):
     size: Size | None = SIZE_FIELD
     spec: StatementSpec
     bindings: list[Binding] | None = BINDINGS_FIELD
+    authoredFrom: list[str] | None = AUTHORED_FROM_FIELD
 
 
 class HeroInput(ToolInput):
@@ -128,6 +143,7 @@ class HeroInput(ToolInput):
     spec: HeroSpec
     size: Size | None = SIZE_FIELD
     bindings: list[Binding] | None = BINDINGS_FIELD
+    authoredFrom: list[str] | None = AUTHORED_FROM_FIELD
 
 
 class LabelInput(ToolInput):
@@ -150,6 +166,7 @@ class UpdateChartInput(ToolInput):
     title: str | None = None
     spec: ChartSpec = Field(description="Full replacement chart spec — include every field to keep.")
     bindings: list[Binding] | None = BINDINGS_FIELD
+    authoredFrom: list[str] | None = AUTHORED_FROM_FIELD
 
 
 class UpdateKpiInput(ToolInput):
@@ -157,6 +174,7 @@ class UpdateKpiInput(ToolInput):
     title: str | None = None
     spec: KpiSpec
     bindings: list[Binding] | None = BINDINGS_FIELD
+    authoredFrom: list[str] | None = AUTHORED_FROM_FIELD
 
 
 class UpdateTableInput(ToolInput):
@@ -164,18 +182,21 @@ class UpdateTableInput(ToolInput):
     title: str | None = None
     spec: TableSpec
     bindings: list[Binding] | None = BINDINGS_FIELD
+    authoredFrom: list[str] | None = AUTHORED_FROM_FIELD
 
 
 class UpdateNarrativeInput(ToolInput):
     widgetId: str = WIDGET_ID_FIELD
     title: str | None = None
     spec: NarrativeSpec
+    authoredFrom: list[str] | None = AUTHORED_FROM_FIELD
 
 
 class UpdateHeroInput(ToolInput):
     widgetId: str = WIDGET_ID_FIELD
     title: str | None = None
     spec: HeroSpec
+    authoredFrom: list[str] | None = AUTHORED_FROM_FIELD
 
 
 class UpdateLabelInput(ToolInput):
@@ -189,6 +210,7 @@ class UpdateStatementInput(ToolInput):
     title: str | None = None
     spec: StatementSpec
     bindings: list[Binding] | None = BINDINGS_FIELD
+    authoredFrom: list[str] | None = AUTHORED_FROM_FIELD
 
 
 # ---- surgical / generic inputs --------------------------------------------------
@@ -322,6 +344,11 @@ class TurnFlags:
     def __init__(self) -> None:
         self.mutated = False
         self.laid_out = False
+        # Documents looked at this turn, and those the model wrote a digest for.
+        # A turn that reads a document but forgets to summarise it gets one backfilled
+        # in run_turn's finally, the same way a missing set_layout gets normalised.
+        self.viewed_docs: set[str] = set()
+        self.digested: set[str] = set()
 
 
 def build_tools(
@@ -348,6 +375,7 @@ def build_tools(
                     "spec": args["spec"],
                     "provenance": args.get("provenance"),
                     "bindings": args.get("bindings"),
+                    "authoredFrom": args.get("authoredFrom"),
                     "size": _to_size(args.get("size")),
                 }
             )
@@ -369,6 +397,7 @@ def build_tools(
                 "spec": args["spec"],
                 "provenance": args.get("provenance"),
                 "bindings": args.get("bindings"),
+                "authoredFrom": args.get("authoredFrom"),
                 "size": _to_size(args.get("size")),
             }
         )
@@ -395,6 +424,7 @@ def build_tools(
                 "title": args.get("title"),
                 "spec": args.get("spec"),
                 "bindings": args.get("bindings"),
+                "authoredFrom": args.get("authoredFrom"),
             }
         )
 

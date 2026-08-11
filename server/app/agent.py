@@ -17,10 +17,13 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from . import uistream as ui
 from .commands import normalize_rows
 from .config import settings
-from .db import audit, get_canvas_summary, rename_canvas_if_untitled, save_messages
+from .db import audit, current_actor, get_canvas_summary, rename_canvas_if_untitled, save_messages
+from .doctools import backfill_digest, build_document_tools
+from .docstore import documents_block, list_documents
 from .graph import build_graph
 from .prompt import system_prompt
 from .tools import TurnFlags, build_tools
+from .window import DocumentWindow, summarise_for_ui
 
 log = logging.getLogger("vision.agent")
 
@@ -139,23 +142,38 @@ async def run_turn(
     canvas_id: str,
     messages: list[dict[str, Any]],
     on_change,
+    actor: str = "local-user",
 ) -> AsyncIterator[dict[str, Any]]:
     """Yields UI message stream parts for one user turn."""
+    current_actor.set(actor)
     prompt_text = last_user_text(messages)
     if prompt_text:
         await rename_canvas_if_untitled(canvas_id, prompt_text)
 
     summary = await get_canvas_summary(canvas_id)
+    documents = await list_documents(canvas_id)
+    docs_block = await documents_block(canvas_id)
     await audit("agent_run", "started", "canvas", canvas_id)
 
     turn = TurnFlags()
     tools = build_tools(canvas_id, on_change, turn)
-    graph = build_graph(tools)
+    # Bound only when the canvas actually has a readable document, so a canvas with
+    # no uploads cannot call a tool that has nothing to act on.
+    tools += build_document_tools(canvas_id, documents, turn, on_change, actor)
+    window = DocumentWindow(keep=settings.doc_window_steps)
+    graph = build_graph(tools, trim=window.trim)
     today = dt.date.today().isoformat()
 
-    lc_messages: list[Any] = [
-        SystemMessage(f"{system_prompt()}\n\n## Current canvas\n\n{summary}\n\nToday is {today}.")
-    ]
+    # Section order is load-bearing for prompt caching: the skill never changes and
+    # the document digest changes only when a document does, so both sit ahead of the
+    # canvas summary, which changes every turn. xAI bills a cached prefix at $0.30/M
+    # against $2.00/M — putting the volatile part first would forfeit that.
+    system = system_prompt()
+    if docs_block:
+        system += f"\n\n## Attached documents\n\n{docs_block}"
+    system += f"\n\n## Current canvas\n\n{summary}\n\nToday is {today}."
+
+    lc_messages: list[Any] = [SystemMessage(system)]
     lc_messages += to_lc_messages(messages)
 
     message_id = ui.new_id("msg")
@@ -170,7 +188,20 @@ async def run_turn(
     reasoning_buf: list[str] = []
     step_open = False
 
-    config = {"recursion_limit": 2 * settings.max_steps + 1}
+    # Name and tag the run so a LangSmith trace is findable later: turns are grouped
+    # per canvas, and the prompt that caused them is right there on the run.
+    config = {
+        "recursion_limit": 2 * settings.max_steps + 1,
+        "run_name": "vision.turn",
+        "tags": ["vision", f"canvas:{canvas_id}"],
+        "metadata": {
+            "canvas_id": canvas_id,
+            "prompt": prompt_text[:300],
+            "model": settings.xai_model,
+            "reasoning_effort": settings.xai_reasoning_effort,
+            "widgets_before": summary.count("\n- "),
+        },
+    }
 
     yield ui.start(message_id)
 
@@ -260,7 +291,12 @@ async def run_turn(
                         call_id = getattr(tm, "tool_call_id", None)
                         pending = pending_inputs.pop(call_id, {})
                         name = pending.get("name") or getattr(tm, "name", "") or "tool"
-                        output = _tool_output(getattr(tm, "content", ""))
+                        # A page-image result carries base64 data URLs — hundreds of
+                        # kilobytes each. Summarise before it reaches the UI stream,
+                        # or the document is shipped to the browser a second time
+                        # over SSE for a rail that only needs to say what happened.
+                        raw_content = summarise_for_ui(getattr(tm, "content", ""))
+                        output = _tool_output(raw_content)
                         yield ui.tool_output_available(call_id, output)
                         # Surface the sources a web_search turned up as citations.
                         if isinstance(output, dict):
@@ -318,5 +354,15 @@ async def run_turn(
                 await normalize_rows(canvas_id)
             except Exception:
                 log.exception("normalize failed")
+
+        # Same shape for documents: a turn that read one but never wrote it down
+        # would leave the next turn with nothing to navigate by.
+        undigested = turn.viewed_docs - turn.digested
+        for doc in documents:
+            if doc["filename"] in undigested and not doc.get("digest"):
+                try:
+                    await backfill_digest(doc)
+                except Exception:
+                    log.exception("digest backfill failed for %s", doc["filename"])
 
         on_change()

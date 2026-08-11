@@ -7,7 +7,7 @@ so ``agent.py`` retains precise control over how the stream maps onto the AI SDK
 UI message protocol.
 """
 
-from typing import Annotated, Any, Sequence, TypedDict
+from typing import Annotated, Any, Callable, Sequence, TypedDict
 
 from langchain_core.messages import AnyMessage
 from langgraph.graph import END, START, StateGraph
@@ -21,12 +21,19 @@ class GraphState(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
 
 
-def build_graph(tools: Sequence[Any]):
+def build_graph(tools: Sequence[Any], trim: Callable[[Sequence[Any]], list[Any]] | None = None):
+    """``trim`` rewrites the message list immediately before the model call.
+
+    It is applied here rather than to graph state so the untrimmed history survives
+    for ``agent.py``'s stream bridge and for the LangSmith trace — only the request
+    to the model is shortened. See ``window.DocumentWindow``.
+    """
     model = chat_model(tools)
     tool_node = ToolNode(tools)
 
     async def agent(state: GraphState) -> dict[str, Any]:
-        response = await model.ainvoke(state["messages"])
+        messages = trim(state["messages"]) if trim else state["messages"]
+        response = await model.ainvoke(messages)
         return {"messages": [response]}
 
     def route(state: GraphState) -> str:

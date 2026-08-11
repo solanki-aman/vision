@@ -8,6 +8,10 @@ import { Settings } from "./Settings";
 import { useTheme } from "./ThemeContext";
 import { buildEntityColors } from "./entities";
 import { FilterProvider } from "./FilterContext";
+import { DocumentProvider, useDocumentStore } from "./DocumentContext";
+import { AttachButton, AttachmentChips, useComposerDrop } from "./Attachments";
+import { PagePreview } from "./PagePreview";
+import { ShareDialog } from "./ShareDialog";
 import type { CanvasState, CanvasStyle, Fact } from "./types";
 
 interface CanvasListItem {
@@ -32,12 +36,18 @@ function CanvasView({ canvasId, onTitle }: { canvasId: string; onTitle: (t: stri
   const [input, setInput] = useState("");
   const [initial, setInitial] = useState<UIMessage[] | null>(null);
   const box = useRef<HTMLTextAreaElement>(null);
+  const docs = useDocumentStore(canvasId);
+  const { over: dropping, dropProps } = useComposerDrop(docs.upload);
+  const refreshDocs = docs.refresh;
 
   const refetch = useCallback(async () => {
     const res = await fetch(`/api/canvases/${canvasId}`);
     const next: CanvasState = await res.json();
     setState(next);
     if (next.canvas) onTitle(next.canvas.title);
+    // Ingest finishing is announced on the same SSE channel as everything else
+    // (§4), so the chip un-greys on this refetch — no second stream, no polling.
+    refreshDocs();
     fetch(`/api/canvases/${canvasId}/facts`)
       .then((r) => r.json())
       .then((rows: Fact[]) => {
@@ -46,7 +56,7 @@ function CanvasView({ canvasId, onTitle }: { canvasId: string; onTitle: (t: stri
         setFacts(map);
       })
       .catch(() => {});
-  }, [canvasId, onTitle]);
+  }, [canvasId, onTitle, refreshDocs]);
 
   useEffect(() => {
     refetch();
@@ -193,6 +203,7 @@ function CanvasView({ canvasId, onTitle }: { canvasId: string; onTitle: (t: stri
 
   return (
     <FilterProvider>
+    <DocumentProvider value={docs}>
     <div
       className={`stage ${present ? "presenting" : bare ? "bare" : railOpen ? "" : "wide"}`}
       data-cards={style?.cards ?? "bordered"}
@@ -261,8 +272,10 @@ function CanvasView({ canvasId, onTitle }: { canvasId: string; onTitle: (t: stri
 
       <div className="dock" hidden={bare}>
         {error && <div className="dock-error">{error.message}</div>}
+        <AttachmentChips />
         <form
-          className={`bar ${busy ? "busy" : ""}`}
+          className={`bar ${busy ? "busy" : ""} ${dropping ? "dropping" : ""}`}
+          {...dropProps}
           onSubmit={(e) => {
             e.preventDefault();
             send(input);
@@ -284,12 +297,17 @@ function CanvasView({ canvasId, onTitle }: { canvasId: string; onTitle: (t: stri
               }
             }}
           />
+          <AttachButton />
           <button type="submit" disabled={busy || !input.trim()}>
             {busy ? <span className="spin" /> : "↵"}
           </button>
+          {dropping && <div className="bar-drop">drop a PDF to attach it</div>}
         </form>
       </div>
+
+      {docs.target && <PagePreview target={docs.target} onClose={docs.close} />}
     </div>
+    </DocumentProvider>
     </FilterProvider>
   );
 }
@@ -313,6 +331,25 @@ function MoonIcon() {
   );
 }
 
+function DownloadIcon() {
+  return (
+    <svg {...ICON} aria-hidden>
+      <path d="M12 3.5v11m0 0l-4-4m4 4l4-4M4.5 19.5h15" />
+    </svg>
+  );
+}
+
+function ShareIcon() {
+  return (
+    <svg {...ICON} aria-hidden>
+      <circle cx="18" cy="5.4" r="2.6" />
+      <circle cx="6" cy="12" r="2.6" />
+      <circle cx="18" cy="18.6" r="2.6" />
+      <path d="M8.3 10.7l7.4-4M8.3 13.3l7.4 4" />
+    </svg>
+  );
+}
+
 function GearIcon() {
   return (
     <svg {...ICON} aria-hidden>
@@ -328,12 +365,47 @@ export default function App() {
   const [title, setTitle] = useState("");
   const [navOpen, setNavOpen] = useState(false);
   const [setOpen, setSetOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const { mode, set } = useTheme();
+
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exporting, setExporting] = useState<string | null>(null);
 
   const refreshList = useCallback(async () => {
     const res = await fetch("/api/canvases");
     setCanvases(await res.json());
   }, []);
+
+  /** Rendering a tall board takes a few seconds, so fetch it rather than
+   * navigating — that way the button can show progress and report a failure. */
+  const exportCanvas = useCallback(
+    async (format: "png" | "pdf") => {
+      if (!active) return;
+      setExporting(format);
+      setExportOpen(false);
+      try {
+        const res = await fetch(`/api/canvases/${active}/export?format=${format}`);
+        if (!res.ok) throw new Error(`export failed (${res.status})`);
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download =
+          res.headers.get("Content-Disposition")?.match(/filename="(.+?)"/)?.[1] ??
+          `canvas.${format}`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } catch (e) {
+        console.error(e);
+        alert(`Could not export this canvas as ${format.toUpperCase()}.`);
+      } finally {
+        setExporting(null);
+      }
+    },
+    [active],
+  );
 
   useEffect(() => {
     refreshList();
@@ -394,6 +466,39 @@ export default function App() {
           >
             {mode === "dark" ? <SunIcon /> : <MoonIcon />}
           </button>
+          <div className="export-wrap">
+            <button
+              className="icon"
+              title="Export this canvas"
+              aria-haspopup="menu"
+              aria-expanded={exportOpen}
+              disabled={!active || exporting !== null}
+              onClick={() => setExportOpen((v) => !v)}
+            >
+              {exporting ? <span className="spin spin-dark" /> : <DownloadIcon />}
+            </button>
+            {exportOpen && (
+              <>
+                <div className="export-scrim" onClick={() => setExportOpen(false)} />
+                <div className="export-menu" role="menu">
+                  <button role="menuitem" onClick={() => exportCanvas("png")}>
+                    PNG <em>image</em>
+                  </button>
+                  <button role="menuitem" onClick={() => exportCanvas("pdf")}>
+                    PDF <em>document</em>
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+          <button
+            className="icon"
+            title="Share this canvas"
+            disabled={!active}
+            onClick={() => setShareOpen(true)}
+          >
+            <ShareIcon />
+          </button>
           <button className="icon" title="Settings" onClick={() => setSetOpen(true)}>
             <GearIcon />
           </button>
@@ -428,6 +533,8 @@ export default function App() {
       )}
 
       {setOpen && <Settings onClose={() => setSetOpen(false)} />}
+
+      {shareOpen && active && <ShareDialog canvasId={active} onClose={() => setShareOpen(false)} />}
 
       {active && <CanvasView key={active} canvasId={active} onTitle={setTitle} />}
     </div>

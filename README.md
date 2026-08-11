@@ -261,6 +261,14 @@ and the code that combined them.
 
 <sub>The $253.5B four-quarter total, expanded. Four sourced facts (`q1`…`q4`, each carrying NVIDIA's own press-release sentence and date) feed a commented Python sum; the result inherits both. Nothing here was typed by the model — every number on this card is either a search result or a formula over search results.</sub>
 
+Words get a softer version of the same treatment. A title like "Freight cost
+doubled while volume grew 9%" is a claim, not a retrieved figure, so it cannot
+bind to one value — the widget carries `authoredFrom` instead, the facts the
+sentence was written from, and the drill-down lists them under *the claim rests
+on*. And a widget that still says "measured" while nothing backs its numbers —
+anything built before binding existed — is labelled **unverified** rather than
+being allowed to look identical to a sourced one.
+
 Full design notes in [`data-provenance-design.md`](data-provenance-design.md).
 
 ## A quieter interface
@@ -298,8 +306,8 @@ Plus one design decision that changes the feel: **the agent designs each canvas.
 
 ## API surface
 
-Twelve endpoints. Two are streams; ten are plain JSON. FastAPI serves the
-docs at [`/docs`](http://localhost:3001/docs).
+Thirteen endpoints. Two are streams, one returns a file, ten are plain JSON.
+FastAPI serves the docs at [`/docs`](http://localhost:3001/docs).
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -309,6 +317,7 @@ docs at [`/docs`](http://localhost:3001/docs).
 | `GET`  | `/api/canvases/{id}` | Full state: meta, style, widgets, placements |
 | `GET`  | `/api/canvases/{id}/messages` | Persisted conversation |
 | `GET`  | `/api/canvases/{id}/facts` | Every fact on the canvas, with its lineage |
+| `GET`  | `/api/canvases/{id}/export` | **File.** The whole board as `png` or `pdf` |
 | `GET`  | `/api/canvases/{id}/events` | **SSE.** `canvas_changed` pings |
 | `POST` | `/api/canvases/{id}/commands` | Apply a change set (agent + direct manipulation share this) |
 | `POST` | `/api/canvases/{id}/compact` | Push overlapping placements down |
@@ -325,6 +334,11 @@ the agent and for GridStack.
 ```bash
 cp .env.example .env   # put your XAI_API_KEY in .env
 ```
+
+`.env` also carries the two speed knobs: `XAI_REASONING_EFFORT` (paid on every
+step of a build turn, so it's the main latency lever) and `XAI_SEARCH_MODEL`
+(search only extracts figures, so it can run on something faster than the
+composer).
 
 ```bash
 docker compose up --build
@@ -366,12 +380,53 @@ above — `scripts/shoot-ui.mjs` captures the full viewport instead:
 cd web && node scripts/shoot-ui.mjs ../screenshots
 ```
 
+### Tests
+
+The deterministic half of the system — the restricted evaluator, fact binding
+and its rejections, spec validation, and undo — is covered by pytest. The suite
+is pure logic apart from the undo tests, which use the compose database and skip
+themselves when one isn't reachable.
+
+```bash
+docker compose exec server python -m pytest -q
+```
+
+## Tracing
+
+Set the `LANGSMITH_*` variables in `.env` and every turn becomes one trace: the
+graph loop, each tool call, and — because search runs on the raw xai-sdk outside
+LangChain, where it would otherwise be a blind spot — the `web_search` step too.
+Runs are named `vision.turn` and tagged `canvas:<id>`, with the prompt, model and
+reasoning effort on the run, so a slow or wrong turn is findable after the fact.
+
+It answers questions the UI can't. On a two-search Tesla turn: `ChatXAI` 2.8s,
+the two searches 37.5s and 29.2s. The composer is not what makes a turn slow —
+which is the whole argument for `XAI_SEARCH_MODEL`.
+
+Leave `LANGSMITH_TRACING` unset and none of it runs.
+
+## Export
+
+Any canvas can leave as a file: **PNG** for pasting, **PDF** for sending. The
+export button in the top bar renders the whole board headlessly — full height,
+no app chrome — through the same `shooter` service the agent uses to look at its
+own work.
+
+## Accessibility
+
+A canvas of `<canvas>` elements is worth nothing to a screen reader, so every
+chart carries a spoken summary (type, range, series, units) *and* a real data
+table beside it, visually hidden but fully reachable. Widgets are labelled
+landmarks named by their own titles, and the provenance dialog moves focus in,
+traps `Tab` while open, and hands focus back to the button that opened it.
+
 ## Keyboard
 
 | Key | Action |
 |---|---|
 | `⌘K` | Focus the command bar |
 | `⌘Z` | Undo the last change set |
+| `Esc` | Close the provenance dialog |
 | `Enter` | Send · `Shift+Enter` newline |
 
 ## Relationship to the architecture plan

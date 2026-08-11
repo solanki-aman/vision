@@ -24,6 +24,11 @@ def frame(part: dict[str, Any]) -> str:
 DONE = "data: [DONE]\n\n"
 
 
+def json_bytes(obj: Any) -> bytes:
+    """For the handful of routes that build a Response by hand to set a cookie."""
+    return json.dumps(obj).encode()
+
+
 def new_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:16]}"
 

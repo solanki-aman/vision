@@ -3,6 +3,7 @@
 import json
 import logging
 import uuid
+from contextvars import ContextVar
 from typing import Any, Iterable, Sequence
 
 import asyncpg
@@ -10,6 +11,11 @@ import asyncpg
 from .config import settings
 
 log = logging.getLogger("vision.db")
+
+# Who is acting, for the audit trail. A ContextVar rather than a threaded parameter
+# because the deep call sites — commands.py, docstore.py, the tool handlers — should
+# not each have to carry an identity they do not otherwise use. Set once per request.
+current_actor: ContextVar[str] = ContextVar("current_actor", default="local-user")
 
 _pool: asyncpg.Pool | None = None
 
@@ -145,6 +151,102 @@ CREATE TABLE IF NOT EXISTS conversation.messages (
 CREATE INDEX IF NOT EXISTS idx_messages_canvas ON conversation.messages (canvas_id, created_at);
 """
 
+# Documents, access grants and sessions. Kept beside the rest of the DDL so a reader
+# sees the whole shape of storage in one place; the queries live in `docstore.py`
+# and `auth.py`.
+#
+# Note what is NOT here: any table of extracted document text. Uploaded files are
+# read as page images (see app/documents.py), so the only text this system stores
+# about a document is the digest — which the model wrote, not a parser.
+DOCUMENTS_SCHEMA = """
+CREATE SCHEMA IF NOT EXISTS documents;
+CREATE SCHEMA IF NOT EXISTS auth;
+
+CREATE TABLE IF NOT EXISTS documents.files (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  canvas_id UUID NOT NULL REFERENCES canvas.canvases(id) ON DELETE CASCADE,
+  filename TEXT NOT NULL,
+  media_type TEXT NOT NULL,
+  byte_size BIGINT NOT NULL,
+  sha256 TEXT NOT NULL,
+  page_count INT,
+  object_key TEXT NOT NULL,
+  uploaded_by TEXT NOT NULL,
+  -- 'canvas' (inherits the canvas grant) or 'uploader' (withheld when shared).
+  -- Can only ever narrow canvas access, never widen it.
+  share_scope TEXT NOT NULL DEFAULT 'canvas',
+  status TEXT NOT NULL DEFAULT 'pending',
+  error TEXT,
+  digest JSONB,
+  -- The row IS the ingest job: `pending` with a stale claim means a worker died or
+  -- a deploy landed mid-render, and the maintenance loop picks it up again. Without
+  -- this a restart strands a document in `pending` forever.
+  claimed_at TIMESTAMPTZ,
+  attempts INT NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  -- The filename is the model-facing handle, so it has to be unambiguous per canvas.
+  UNIQUE (canvas_id, filename)
+);
+-- The index on claimed_at is created after the ALTERs below, not here: on a database
+-- that predates the column, CREATE TABLE IF NOT EXISTS is a no-op and this block
+-- would reference a column that does not exist yet.
+CREATE INDEX IF NOT EXISTS idx_documents_canvas ON documents.files (canvas_id, created_at);
+
+CREATE TABLE IF NOT EXISTS documents.renders (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  file_id UUID NOT NULL REFERENCES documents.files(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  first_page INT NOT NULL,
+  last_page INT NOT NULL,
+  cols INT NOT NULL DEFAULT 1,
+  dpi INT NOT NULL,
+  width INT NOT NULL,
+  height INT NOT NULL,
+  tokens INT NOT NULL,
+  object_key TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  -- Makes rendering idempotent: the same pages at the same dpi is a lookup.
+  UNIQUE (file_id, kind, first_page, last_page, dpi)
+);
+
+-- ON DELETE CASCADE does not reach object storage, so erasure is a job with retry
+-- rather than a side effect of dropping a row.
+CREATE TABLE IF NOT EXISTS documents.deletions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  prefix TEXT NOT NULL,
+  attempts INT NOT NULL DEFAULT 0,
+  last_error TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  completed_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_deletions_pending
+  ON documents.deletions (created_at) WHERE completed_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS canvas.grants (
+  canvas_id UUID NOT NULL REFERENCES canvas.canvases(id) ON DELETE CASCADE,
+  principal TEXT NOT NULL,          -- 'user:<sub>' or 'group:<idp-group-id>'
+  role TEXT NOT NULL,               -- owner | editor | viewer
+  granted_by TEXT NOT NULL,
+  granted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (canvas_id, principal)
+);
+CREATE INDEX IF NOT EXISTS idx_grants_principal ON canvas.grants (principal);
+
+-- Sessions live in Postgres rather than Redis: one fewer service, and durable
+-- across a restart. Swap for Redis when this runs as more than one instance.
+CREATE TABLE IF NOT EXISTS auth.sessions (
+  id TEXT PRIMARY KEY,
+  subject TEXT NOT NULL,
+  email TEXT,
+  display_name TEXT,
+  role TEXT NOT NULL DEFAULT 'member',
+  groups JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON auth.sessions (expires_at);
+"""
+
 # Early builds keyed messages on id alone, so assistant ids collided across canvases.
 MESSAGE_PK_REPAIR = """
 DO $$
@@ -173,13 +275,26 @@ async def init_db() -> None:
     _pool = await asyncpg.create_pool(dsn, min_size=1, max_size=10, init=_init_connection)
     async with _pool.acquire() as conn:
         await conn.execute(SCHEMA)
+        await conn.execute(DOCUMENTS_SCHEMA)
         await conn.execute("ALTER TABLE canvas.canvases ADD COLUMN IF NOT EXISTS style JSONB")
         await conn.execute("ALTER TABLE canvas.widgets ADD COLUMN IF NOT EXISTS bindings JSONB")
+        # A title or narrative is the model's CLAIM, not a retrieved figure — it gets a
+        # softer provenance than a bound number: the facts it was written from.
+        await conn.execute("ALTER TABLE canvas.widgets ADD COLUMN IF NOT EXISTS authored_from JSONB")
         await conn.execute("ALTER TABLE canvas.facts ADD COLUMN IF NOT EXISTS inputs JSONB")
         # created_at is transaction-start time in Postgres, so every row a single
         # save_messages() call writes shares one timestamp — a user prompt and its
         # own reply can tie. seq is a true insertion-order tiebreak.
         await conn.execute("ALTER TABLE conversation.messages ADD COLUMN IF NOT EXISTS seq BIGSERIAL")
+        # Ingest became a resumable job after the tables already existed.
+        await conn.execute("ALTER TABLE documents.files ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ")
+        await conn.execute(
+            "ALTER TABLE documents.files ADD COLUMN IF NOT EXISTS attempts INT NOT NULL DEFAULT 0"
+        )
+        await conn.execute(
+            """CREATE INDEX IF NOT EXISTS idx_documents_pending
+               ON documents.files (claimed_at) WHERE status = 'pending'"""
+        )
         await conn.execute(MESSAGE_PK_REPAIR)
 
 
@@ -200,23 +315,33 @@ async def audit(
     try:
         await pool().execute(
             """INSERT INTO audit.events (actor, action, target_type, target_id, outcome, metadata)
-               VALUES ('local-user', $1, $2, $3, $4, $5)""",
+               VALUES ($6, $1, $2, $3, $4, $5)""",
             action,
             target_type,
             uid(target_id) if target_id else None,
             outcome,
             metadata,
+            current_actor.get(),
         )
     except Exception:  # audit must never break the request path
         log.exception("audit write failed")
 
 
-async def list_canvases() -> list[dict[str, Any]]:
+async def list_canvases(principals: Sequence[str] | None = None) -> list[dict[str, Any]]:
+    """Canvases the caller holds a grant on. `principals=None` means unfiltered, which
+    is only correct when authentication is off — the endpoint decides, not this."""
+    where = ""
+    args: list[Any] = []
+    if principals is not None:
+        where = """WHERE EXISTS (SELECT 1 FROM canvas.grants g
+                                 WHERE g.canvas_id = c.id AND g.principal = ANY($1::text[]))"""
+        args.append(list(principals))
     rows = await pool().fetch(
-        """SELECT c.id, c.title, c.updated_at,
-                  (SELECT count(*) FROM canvas.widgets w
-                   WHERE w.canvas_id = c.id AND w.status = 'active') AS widget_count
-           FROM canvas.canvases c ORDER BY c.updated_at DESC LIMIT 100"""
+        f"""SELECT c.id, c.title, c.updated_at,
+                   (SELECT count(*) FROM canvas.widgets w
+                    WHERE w.canvas_id = c.id AND w.status = 'active') AS widget_count
+            FROM canvas.canvases c {where} ORDER BY c.updated_at DESC LIMIT 100""",
+        *args,
     )
     # The web client renders widget_count as text, matching the pg driver's bigint-as-string.
     return [{**dict(r), "widget_count": str(r["widget_count"])} for r in rows]
@@ -243,8 +368,8 @@ async def rename_canvas_if_untitled(canvas_id: Any, title: str) -> None:
 async def get_canvas_state(canvas_id: Any) -> dict[str, Any]:
     cid = uid(canvas_id)
     widgets = await pool().fetch(
-        """SELECT w.id, w.kind, w.title, w.spec, w.provenance, w.bindings, w.current_version,
-                  p.x, p.y, p.w, p.h
+        """SELECT w.id, w.kind, w.title, w.spec, w.provenance, w.bindings,
+                  w.authored_from AS "authoredFrom", w.current_version, p.x, p.y, p.w, p.h
            FROM canvas.widgets w
            LEFT JOIN canvas.placements p ON p.widget_id = w.id
            WHERE w.canvas_id = $1 AND w.status = 'active'

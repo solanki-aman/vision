@@ -304,14 +304,16 @@ async def apply_change_set(
                         size = op.get("size") or size_for(widget_kind, spec)
                         x, y = await _next_slot(conn, cid, size["w"], size["h"])
                         widget_id = await conn.fetchval(
-                            """INSERT INTO canvas.widgets (canvas_id, kind, title, spec, provenance, bindings)
-                               VALUES ($1, $2, $3, $4, $5, $6) RETURNING id""",
+                            """INSERT INTO canvas.widgets
+                                 (canvas_id, kind, title, spec, provenance, bindings, authored_from)
+                               VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id""",
                             cid,
                             widget_kind,
                             op.get("title"),
                             spec,
                             op.get("provenance"),
                             bindings,
+                            op.get("authoredFrom"),
                         )
                         await conn.execute(
                             """INSERT INTO canvas.placements (canvas_id, widget_id, x, y, w, h)
@@ -356,6 +358,7 @@ async def apply_change_set(
                             """UPDATE canvas.widgets
                                SET title = $2, spec = $3, provenance = COALESCE($4, provenance),
                                    bindings = COALESCE($5, bindings),
+                                   authored_from = COALESCE($6, authored_from),
                                    current_version = current_version + 1, updated_at = now()
                                WHERE id = $1""",
                             wid,
@@ -363,6 +366,7 @@ async def apply_change_set(
                             spec,
                             op.get("provenance"),
                             bindings,
+                            op.get("authoredFrom"),
                         )
                         applied.append({"operation": op, "widgetId": str(wid)})
                         inverse.append(
@@ -896,11 +900,18 @@ async def normalize_rows(canvas_id: Any) -> int:
 
 
 async def undo_last(canvas_id: Any) -> ApplyResult | None:
-    """Undo is a new change set of stored inverse operations — history is never deleted (plan §2.8)."""
+    """Undo is a new change set of stored inverse operations — history is never deleted (plan §2.8).
+
+    That new change set is itself applied and carries its own inverse, so it must never
+    become the *next* undo's target: otherwise a second consecutive undo would just redo
+    what the first one removed. Undo targets real edits only (`origin <> 'undo'`), which
+    is what lets repeated undo walk back through the stack.
+    """
     cid = uid(canvas_id)
     row = await pool().fetchrow(
         """SELECT id, inverse FROM canvas.change_sets
-           WHERE canvas_id = $1 AND status = 'applied' AND undone = false AND inverse IS NOT NULL
+           WHERE canvas_id = $1 AND status = 'applied' AND undone = false
+             AND inverse IS NOT NULL AND origin <> 'undo'
            ORDER BY created_at DESC LIMIT 1""",
         cid,
     )

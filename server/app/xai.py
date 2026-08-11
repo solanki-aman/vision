@@ -28,5 +28,9 @@ def chat_model(tools: Sequence[Any]):
     the multi-tool loop. The API key is read from XAI_API_KEY in the env."""
     if not settings.xai_api_key:
         raise RuntimeError("XAI_API_KEY is not set")
-    llm = ChatXAI(model=settings.xai_model, timeout=3600)
+    llm = ChatXAI(
+        model=settings.xai_model,
+        reasoning_effort=settings.xai_reasoning_effort,
+        timeout=3600,
+    )
     return llm.bind_tools(tools)
