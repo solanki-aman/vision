@@ -3,6 +3,7 @@ import { GridStack, type GridStackNode } from "gridstack";
 import "gridstack/dist/gridstack.min.css";
 import { WidgetBody } from "./widgets/WidgetBody";
 import { ProvBadge } from "./Provenance";
+import { PinIcon } from "./Icons";
 import type { Fact, Widget } from "./types";
 
 const CONFIDENCE_LABEL = {
@@ -56,6 +57,7 @@ interface Props {
   revealY: number | null;
   onLayoutChange: (ops: { kind: "move_widget" | "resize_widget"; widgetId: string; x?: number; y?: number; w?: number; h?: number }[]) => void;
   onRemove: (widgetId: string) => void;
+  onPin?: (widget: Widget) => void;
 }
 
 const FULL_COLUMNS = 12;
@@ -66,7 +68,7 @@ function columnsFor(width: number) {
   return FULL_COLUMNS;
 }
 
-export function Canvas({ widgets, entities, facts, revealY, onLayoutChange, onRemove }: Props) {
+export function Canvas({ widgets, entities, facts, revealY, onLayoutChange, onRemove, onPin }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const grid = useRef<GridStack | null>(null);
   const items = useRef(new Map<string, HTMLDivElement>());
@@ -206,9 +208,21 @@ export function Canvas({ widgets, entities, facts, revealY, onLayoutChange, onRe
             {w.kind !== "label" && w.kind !== "hero" && (
             <header className="widget-grip">
               <h3 title={w.title}>{w.title}</h3>
-              <button className="widget-x" onClick={() => onRemove(w.id)} aria-label={`Remove ${w.title}`}>
-                ✕
-              </button>
+              <div className="widget-tools">
+                {onPin && (
+                  <button
+                    className="widget-pin"
+                    onClick={() => onPin(w)}
+                    aria-label={`Pin ${w.title} to Home`}
+                    title="Pin to Home"
+                  >
+                    <PinIcon size={14} />
+                  </button>
+                )}
+                <button className="widget-x" onClick={() => onRemove(w.id)} aria-label={`Remove ${w.title}`}>
+                  <span aria-hidden>✕</span>
+                </button>
+              </div>
             </header>
             )}
             <div className="widget-body">
