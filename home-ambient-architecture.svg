@@ -1,0 +1,254 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 1460" width="1240" height="1460" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
+  <style>
+    :root { color-scheme: light dark; }
+    .bg      { fill: #fbfaf8; }
+    .zone    { fill: #ffffff; stroke: #e2ddd4; }
+    .zone-2  { fill: #f5f2ec; stroke: #e2ddd4; }
+    .node    { fill: #ffffff; stroke: #cfc8bb; }
+    .ink     { fill: #211f1c; }
+    .ink-2   { fill: #6b655c; }
+    .ink-3   { fill: #948d81; }
+    .rule    { stroke: #e2ddd4; }
+    .flow    { stroke: #8a8378; fill: none; }
+    .amb     { fill: #f2ece1; stroke: #c9a24a; }
+    .amb-ink { fill: #7d5f14; }
+    .amb-fl  { stroke: #c9a24a; fill: none; }
+    .ent     { fill: #f6ebe8; stroke: #c2705c; }
+    .ent-ink { fill: #8d3f28; }
+    .pub     { fill: #eaf0ea; stroke: #7f9c7f; }
+    .pub-ink { fill: #3f5c3f; }
+    .arrowhd { fill: #8a8378; }
+    .arrowam { fill: #c9a24a; }
+    .mono    { font-family: ui-monospace, 'SF Mono', Menlo, monospace; }
+    @media (prefers-color-scheme: dark) {
+      .bg     { fill: #131211; }
+      .zone   { fill: #1c1a18; stroke: #363330; }
+      .zone-2 { fill: #201e1b; stroke: #363330; }
+      .node   { fill: #232120; stroke: #464240; }
+      .ink    { fill: #f0ede8; }
+      .ink-2  { fill: #a8a29a; }
+      .ink-3  { fill: #7d776f; }
+      .rule   { stroke: #363330; }
+      .flow   { stroke: #8a8378; }
+      .amb    { fill: #2a2419; stroke: #b08d3c; }
+      .amb-ink{ fill: #e0bd67; }
+      .ent    { fill: #2c1e1a; stroke: #a85f4c; }
+      .ent-ink{ fill: #e29a85; }
+      .pub    { fill: #1b241b; stroke: #6c8a6c; }
+      .pub-ink{ fill: #9dbb9d; }
+    }
+  </style>
+
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" class="arrowhd"/>
+    </marker>
+    <marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" class="arrowam"/>
+    </marker>
+  </defs>
+
+  <rect width="1240" height="1460" class="bg"/>
+
+  <!-- ══ TITLE ══════════════════════════════════════════════════════════ -->
+  <text x="40" y="52" class="ink" font-size="27" font-weight="600">Home and the ambient agent</text>
+  <text x="40" y="78" class="ink-2" font-size="14.5">One layer split makes both possible: recipes are re-executable, so a tile can refresh — and can resolve differently per viewer.</text>
+  <line x1="40" y1="98" x2="1200" y2="98" class="rule"/>
+
+  <!-- ══ PANEL A ════════════════════════════════════════════════════════ -->
+  <text x="40" y="132" class="ink-3" font-size="12" font-weight="600" letter-spacing="1.4">A · THE STACK</text>
+
+  <!-- HOME -->
+  <rect x="40" y="146" width="1160" height="132" rx="10" class="zone"/>
+  <text x="60" y="174" class="ink" font-size="16" font-weight="600">Home</text>
+  <text x="126" y="174" class="ink-3" font-size="12.5">no composer · no Generate · nothing to type into</text>
+
+  <rect x="60" y="188" width="330" height="72" rx="7" class="amb"/>
+  <text x="76" y="210" class="amb-ink" font-size="13" font-weight="600">✦ Morning brief</text>
+  <text x="76" y="230" class="ink-2" font-size="11.5">findings that cleared the interrupt budget</text>
+  <text x="76" y="247" class="ink-3" font-size="11.5">the one band the user does not curate · empty is correct</text>
+
+  <rect x="406" y="188" width="774" height="72" rx="7" class="zone-2"/>
+  <text x="422" y="210" class="ink" font-size="13" font-weight="600">Pinned sections</text>
+  <text x="422" y="230" class="ink-2" font-size="11.5">Revenue · Margin &amp; cost · Cash · Plan vs actual · Market · Filings &amp; docs</text>
+  <text x="422" y="247" class="ink-3" font-size="11.5">the dock and the section list are one taxonomy, so “which section?” has an answer set</text>
+
+  <!-- arrow: home <- viz -->
+  <path d="M620 320 L620 282" class="flow" stroke-width="1.6" marker-end="url(#a)"/>
+  <text x="634" y="304" class="ink-2" font-size="12">resolve per viewer — values are never in the payload</text>
+
+  <!-- VIZ -->
+  <rect x="40" y="322" width="1160" height="86" rx="10" class="zone"/>
+  <text x="60" y="350" class="ink" font-size="16" font-weight="600">Viz layer</text>
+  <text x="152" y="350" class="pub-ink" font-size="12" font-weight="600">portable · carries no numbers · safe to send anywhere</text>
+  <rect x="60" y="362" width="330" height="32" rx="6" class="node"/>
+  <text x="76" y="383" class="ink-2 mono" font-size="12">widget.spec  ← template, holes not values</text>
+  <rect x="406" y="362" width="330" height="32" rx="6" class="node"/>
+  <text x="422" y="383" class="ink-2 mono" font-size="12">bindings[]   ← path → slot</text>
+  <text x="756" y="383" class="ink-3" font-size="11.5">Unchanged shape. The stored spec is demoted to a cache of the last materialisation.</text>
+
+  <!-- arrow: viz <- data -->
+  <path d="M620 470 L620 412" class="flow" stroke-width="1.6" marker-end="url(#a)"/>
+  <text x="634" y="438" class="ink mono" font-size="12" font-weight="600">bind_and_materialize()</text>
+  <text x="634" y="456" class="ink-2" font-size="11.5">the one function that writes a value into a spec — now called at read time, per viewer</text>
+
+  <!-- DATA -->
+  <rect x="40" y="472" width="1160" height="104" rx="10" class="zone"/>
+  <text x="60" y="500" class="ink" font-size="16" font-weight="600">Data layer</text>
+  <text x="166" y="500" class="ent-ink" font-size="12" font-weight="600">entitlement-bearing · re-executable</text>
+
+  <rect x="60" y="512" width="300" height="48" rx="6" class="node"/>
+  <text x="76" y="532" class="ink mono" font-size="12.5">query</text>
+  <text x="76" y="550" class="ink-3" font-size="11">the recipe · source · op · params · access_class</text>
+  <path d="M368 536 L400 536" class="flow" stroke-width="1.4" marker-end="url(#a)"/>
+  <rect x="406" y="512" width="300" height="48" rx="6" class="node"/>
+  <text x="422" y="532" class="ink mono" font-size="12.5">query_run</text>
+  <text x="422" y="550" class="ink-3" font-size="11">executed AS a principal, AT a time</text>
+  <path d="M714 536 L746 536" class="flow" stroke-width="1.4" marker-end="url(#a)"/>
+  <rect x="752" y="512" width="300" height="48" rx="6" class="node"/>
+  <text x="768" y="532" class="ink mono" font-size="12.5">fact</text>
+  <text x="768" y="550" class="ink-3" font-size="11">an observation, with lineage</text>
+  <text x="1066" y="532" class="ink-3" font-size="11">Today a fact</text>
+  <text x="1066" y="547" class="ink-3" font-size="11">has no recipe</text>
+  <text x="1066" y="562" class="ink-3" font-size="11">behind it.</text>
+
+  <!-- arrow: data <- gate, with the A/B split -->
+  <path d="M620 656 L620 580" class="flow" stroke-width="1.6" marker-end="url(#a)"/>
+
+  <rect x="672" y="592" width="252" height="26" rx="5" class="pub"/>
+  <text x="686" y="610" class="pub-ink" font-size="11.5">Ada · finance-leadership → 5 regions</text>
+  <rect x="672" y="624" width="358" height="26" rx="5" class="ent"/>
+  <text x="686" y="642" class="ent-ink" font-size="11.5">Blake · us-analysts → 1 region + withheld {"region": 4}</text>
+
+  <!-- GATE -->
+  <rect x="40" y="658" width="1160" height="66" rx="10" class="ent"/>
+  <text x="60" y="684" class="ent-ink" font-size="15" font-weight="600">Entitlement gate</text>
+  <text x="60" y="706" class="ink-2" font-size="12">The predicate is <tspan font-weight="600">appended, never substituted</tspan> — a region you lack returns empty plus a withheld count.</text>
+  <text x="880" y="684" class="ink-3" font-size="11.5">the entitlement fingerprint is in the cache key,</text>
+  <text x="880" y="702" class="ink-3" font-size="11.5">so Ada's rows can never be served to Blake</text>
+
+  <!-- arrow: gate <- sources -->
+  <path d="M620 796 L620 728" class="flow" stroke-width="1.6" marker-end="url(#a)"/>
+
+  <!-- SOURCES -->
+  <rect x="40" y="798" width="1160" height="86" rx="10" class="zone"/>
+  <text x="60" y="826" class="ink" font-size="16" font-weight="600">Sources</text>
+  <text x="150" y="826" class="ink-3" font-size="12">access_class is derived from the source — never chosen by the user or the model</text>
+
+  <rect x="60" y="838" width="266" height="34" rx="6" class="pub"/>
+  <text x="76" y="860" class="pub-ink" font-size="12"><tspan class="mono">web_search</tspan>  ·  public</text>
+  <rect x="342" y="838" width="266" height="34" rx="6" class="ent"/>
+  <text x="358" y="860" class="ent-ink" font-size="12"><tspan class="mono">warehouse</tspan>  ·  entitled</text>
+  <rect x="624" y="838" width="266" height="34" rx="6" class="ent"/>
+  <text x="640" y="860" class="ent-ink" font-size="12"><tspan class="mono">documents</tspan>  ·  entitled</text>
+  <rect x="906" y="838" width="274" height="34" rx="6" class="zone-2"/>
+  <text x="922" y="860" class="ink-2" font-size="12"><tspan class="mono">code_execution</tspan>  ·  max(inputs)</text>
+
+  <text x="60" y="905" class="ink-3" font-size="11.5">Public-only tiles share as a snapshot — no delegation needed. Anything entitled shares as recipes and re-executes per viewer. <tspan class="ink-2">That rule falls out of this row; it is not a checkbox.</tspan></text>
+
+  <line x1="40" y1="938" x2="1200" y2="938" class="rule"/>
+
+  <!-- ══ PANEL B ════════════════════════════════════════════════════════ -->
+  <text x="40" y="972" class="ink-3" font-size="12" font-weight="600" letter-spacing="1.4">B · THE AMBIENT LOOP</text>
+  <text x="240" y="972" class="ink-2" font-size="12.5">— what fills the brief, given nobody can type into Home</text>
+
+  <!-- row 1 -->
+  <rect x="40" y="990" width="196" height="66" rx="8" class="amb"/>
+  <text x="56" y="1014" class="amb-ink" font-size="13" font-weight="600">Trigger</text>
+  <text x="56" y="1032" class="ink-2" font-size="11">schedule · data event</text>
+  <text x="56" y="1047" class="ink-2" font-size="11">· watch condition</text>
+
+  <path d="M244 1023 L282 1023" class="amb-fl" stroke-width="1.6" marker-end="url(#b)"/>
+
+  <rect x="290" y="990" width="212" height="66" rx="8" class="node"/>
+  <text x="306" y="1014" class="ink" font-size="13" font-weight="600">Rung 0 · Refresh</text>
+  <text x="306" y="1032" class="ink-2" font-size="11">re-run queries as the owner</text>
+  <text x="306" y="1047" class="pub-ink" font-size="11" font-weight="600">SQL only — no model call</text>
+
+  <path d="M510 1023 L548 1023" class="amb-fl" stroke-width="1.6" marker-end="url(#b)"/>
+
+  <rect x="556" y="990" width="228" height="66" rx="8" class="zone-2"/>
+  <text x="572" y="1014" class="ink" font-size="13" font-weight="600">Delta gate</text>
+  <text x="572" y="1032" class="ink-2" font-size="11">moved &gt; k × the figure's own</text>
+  <text x="572" y="1047" class="ink-2" font-size="11">historical volatility?</text>
+
+  <path d="M792 1023 L830 1023" class="amb-fl" stroke-width="1.6" marker-end="url(#b)"/>
+  <text x="800" y="1014" class="ink-3" font-size="10.5">yes</text>
+
+  <rect x="838" y="990" width="212" height="66" rx="8" class="amb"/>
+  <text x="854" y="1014" class="amb-ink" font-size="13" font-weight="600">Rung 1 · Notice</text>
+  <text x="854" y="1032" class="ink-2" font-size="11">one bounded call, no tools</text>
+  <text x="854" y="1047" class="ink-2" font-size="11">“is this worth saying?”</text>
+
+  <!-- no branch -->
+  <path d="M670 1064 L670 1098" class="flow" stroke-width="1.4" marker-end="url(#a)"/>
+  <text x="682" y="1082" class="ink-3" font-size="10.5">no</text>
+  <rect x="556" y="1100" width="228" height="40" rx="7" class="zone-2"/>
+  <text x="572" y="1118" class="ink-2" font-size="11.5">freshness updated, nothing said</text>
+  <text x="572" y="1133" class="pub-ink" font-size="11" font-weight="600">zero model cost</text>
+
+  <text x="806" y="1120" class="ink-2" font-size="11.5">Cost scales with <tspan font-weight="600">change</tspan>, not with time.</text>
+  <text x="806" y="1136" class="ink-3" font-size="11.5">A quiet week costs the price of some SQL.</text>
+
+  <!-- row 2 -->
+  <path d="M944 1064 L944 1170" class="amb-fl" stroke-width="1.6" marker-end="url(#b)"/>
+
+  <rect x="838" y="1172" width="212" height="72" rx="8" class="node"/>
+  <text x="854" y="1196" class="ink" font-size="13" font-weight="600">Finding</text>
+  <text x="854" y="1214" class="ink-2" font-size="11">bound to facts, like a widget</text>
+  <text x="854" y="1229" class="ent-ink" font-size="11" font-weight="600">personal — never travels</text>
+
+  <path d="M830 1208 L790 1208" class="amb-fl" stroke-width="1.6" marker-end="url(#b)"/>
+
+  <rect x="556" y="1160" width="228" height="104" rx="8" class="zone-2"/>
+  <text x="572" y="1186" class="ink" font-size="13" font-weight="600">Route + budget</text>
+  <text x="572" y="1206" class="ink-2" font-size="11">notify: 3/day, they compete,</text>
+  <text x="572" y="1221" class="ink-2" font-size="11">repeats suppressed, dismissal</text>
+  <text x="572" y="1236" class="ink-2" font-size="11">trains the judge</text>
+  <text x="572" y="1254" class="ent-ink" font-size="11" font-weight="600">question · review: unbudgeted</text>
+
+  <path d="M548 1181 L300 1181" class="amb-fl" stroke-width="1.6" marker-end="url(#b)"/>
+  <path d="M548 1215 L300 1215" class="flow" stroke-width="1.4" marker-end="url(#a)"/>
+  <path d="M548 1249 L300 1249" class="flow" stroke-width="1.4" marker-end="url(#a)"/>
+
+  <rect x="40" y="1166" width="252" height="30" rx="7" class="amb"/>
+  <text x="56" y="1186" class="amb-ink" font-size="12" font-weight="600">notify, above the line → brief</text>
+  <rect x="40" y="1200" width="252" height="30" rx="7" class="zone-2"/>
+  <text x="56" y="1220" class="ink-2" font-size="12">notify, below → onto its tile</text>
+  <rect x="40" y="1234" width="252" height="30" rx="7" class="ent"/>
+  <text x="56" y="1254" class="ent-ink" font-size="12" font-weight="600">question · review → Inbox</text>
+
+  <text x="40" y="1284" class="ink-3" font-size="11.5">Budget the <tspan class="ink-2" font-weight="600">interrupt</tspan>, not the record. The Inbox holds only what is <tspan class="ink-2" font-weight="600">addressed to you</tspan>, so it can reach zero.</text>
+
+  <!-- ══ THE GATE INSET ═════════════════════════════════════════════════ -->
+  <line x1="40" y1="1298" x2="1200" y2="1298" class="rule"/>
+  <text x="40" y="1330" class="ink-3" font-size="12" font-weight="600" letter-spacing="1.4">C · TWO CALLERS, ONE WRITE GATE</text>
+
+  <rect x="40" y="1346" width="212" height="42" rx="7" class="node"/>
+  <text x="56" y="1364" class="ink" font-size="12.5" font-weight="600">Human types</text>
+  <text x="56" y="1380" class="ink-3" font-size="11">on a canvas, never on Home</text>
+  <path d="M260 1367 L316 1367" class="flow" stroke-width="1.6" marker-end="url(#a)"/>
+  <rect x="324" y="1346" width="196" height="42" rx="7" class="node"/>
+  <text x="340" y="1370" class="ink-2 mono" font-size="12">interactive graph</text>
+
+  <rect x="40" y="1398" width="212" height="42" rx="7" class="amb"/>
+  <text x="56" y="1416" class="amb-ink" font-size="12.5" font-weight="600">Trigger fires</text>
+  <text x="56" y="1432" class="ink-3" font-size="11">nobody is at the keyboard</text>
+  <path d="M260 1419 L316 1419" class="amb-fl" stroke-width="1.6" marker-end="url(#b)"/>
+  <rect x="324" y="1398" width="196" height="42" rx="7" class="amb"/>
+  <text x="340" y="1422" class="amb-ink mono" font-size="12">ambient graph</text>
+
+  <path d="M528 1367 L588 1367 L588 1393" class="flow" stroke-width="1.6"/>
+  <path d="M528 1419 L588 1419 L588 1397" class="amb-fl" stroke-width="1.6"/>
+  <path d="M588 1393 L636 1393" class="flow" stroke-width="1.6" marker-end="url(#a)"/>
+
+  <rect x="644" y="1372" width="260" height="42" rx="7" class="node"/>
+  <text x="660" y="1390" class="ink mono" font-size="12.5">apply_change_set()</text>
+  <text x="660" y="1406" class="ink-3" font-size="10.5">validation · measured invariant · audit · undo</text>
+
+  <path d="M912 1393 L960 1393" class="flow" stroke-width="1.6" marker-end="url(#a)"/>
+  <rect x="968" y="1372" width="212" height="42" rx="7" class="zone-2"/>
+  <text x="984" y="1397" class="ink-2" font-size="12.5">canvas · widgets · facts</text>
+
+  <text x="644" y="1440" class="ink-2" font-size="11.5">Ambient gets a second <tspan font-weight="600">caller</tspan>, not a second write path. Every guarantee already proven here still holds.</text>
+</svg>
