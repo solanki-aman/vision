@@ -143,9 +143,11 @@ async def run_turn(
     messages: list[dict[str, Any]],
     on_change,
     actor: str = "local-user",
+    principals: "list[str] | None" = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Yields UI message stream parts for one user turn."""
     current_actor.set(actor)
+    principals = principals or ["user:local-user"]
     prompt_text = last_user_text(messages)
     if prompt_text:
         await rename_canvas_if_untitled(canvas_id, prompt_text)
@@ -156,7 +158,7 @@ async def run_turn(
     await audit("agent_run", "started", "canvas", canvas_id)
 
     turn = TurnFlags()
-    tools = build_tools(canvas_id, on_change, turn)
+    tools = build_tools(canvas_id, on_change, turn, principals)
     # Bound only when the canvas actually has a readable document, so a canvas with
     # no uploads cannot call a tool that has nothing to act on.
     tools += build_document_tools(canvas_id, documents, turn, on_change, actor)

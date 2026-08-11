@@ -80,6 +80,13 @@ async def lifespan(app: FastAPI):
     await init_db()
     await objects.ensure_bucket()
     await purge_expired_sessions()
+    await events.start_listener()
+    # The mock warehouse the entitled tiles read from. Idempotent; only the first
+    # start populates it. In production this is a connector, not a seed.
+    from . import finance
+
+    if await finance.seed():
+        log.info("seeded the mock finance warehouse")
     redaction = tracing.install()
     if settings.auth_enabled and settings.auth_bootstrap_subject:
         granted = await backfill_owner_grants(settings.auth_bootstrap_subject)
@@ -112,6 +119,7 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         keeper.cancel()
+        await events.stop_listener()
         await close_db()
 
 
@@ -608,6 +616,205 @@ async def add_grant(
     return {"ok": True, "grants": await list_grants(canvas_id)}
 
 
+# ---- home ------------------------------------------------------------------------------------
+# The default surface. Sections and pins are personal; a tile's numbers are resolved
+# for the caller at read time, so two people holding the same pin never see each other's
+# figures. See home.py and home-screen-design.md.
+
+
+@app.get("/api/home")
+async def home_state(principal: Principal = Depends(current_principal)) -> dict[str, Any]:
+    from . import home as home_mod
+
+    subject = principal.subject
+    sections = await home_mod.ensure_sections(subject)
+    pins = await home_mod.list_pins(subject)
+    prefs = await home_mod.prefs(subject)
+    brief = await home_mod.brief_for(subject, settings.ambient_brief_budget)
+    inbox = await home_mod.list_findings(subject, interaction="question") + \
+        await home_mod.list_findings(subject, interaction="review")
+    shared = await home_mod.shared_sections(principal.principals)
+
+    return {
+        "greeting": principal.name or (principal.email or subject).split("@")[0],
+        "sections": [
+            {"id": str(s["id"]), "key": s["key"], "title": s["title"], "ord": s["ord"]}
+            for s in sections
+        ],
+        "pins": [
+            {
+                "id": str(p["id"]),
+                "sectionId": str(p["section_id"]),
+                "widgetId": str(p["widget_id"]),
+                "canvasId": str(p["canvas_id"]),
+                "title": p["title"],
+                "kind": p["widget_kind"],
+                "spec": p["cached_spec"],
+                "provenance": p["provenance"],
+                "w": p["w"],
+                "h": p["h"],
+                "status": p["status"],
+                "statusReason": p["status_reason"],
+                "cadence": p["cadence"],
+                "changed": bool(p["changed_at"] and (not p["seen_at"] or p["changed_at"] > p["seen_at"])),
+            }
+            for p in pins
+        ],
+        "brief": [
+            {"id": str(b["id"]), "headline": b["headline"], "detail": b["detail"],
+             "pinId": str(b["pin_id"]) if b["pin_id"] else None,
+             "narrowed": b["narrowed"], "kind": b["kind"]}
+            for b in brief
+        ],
+        "inbox": [
+            {"id": str(f["id"]), "headline": f["headline"], "detail": f["detail"],
+             "interaction": f["interaction"], "allowed": f["allowed"], "kind": f["kind"]}
+            for f in inbox
+        ],
+        "prefs": {"briefHour": prefs["brief_hour"], "timezone": prefs["timezone"]},
+        "shared": [{"id": str(s["id"]), "key": s["key"], "title": s["title"],
+                    "owner": s["owner_subject"]} for s in shared],
+        "briefBudget": settings.ambient_brief_budget,
+    }
+
+
+@app.post("/api/home/seen", status_code=204)
+async def home_seen(principal: Principal = Depends(current_principal)) -> Response:
+    from . import home as home_mod
+
+    await home_mod.mark_seen(principal.subject)
+    return Response(status_code=204)
+
+
+@app.get("/api/home/pulse")
+async def home_pulse(principal: Principal = Depends(current_principal)) -> dict[str, Any]:
+    """The CFO glance: headline finance metrics, resolved as the caller."""
+    from . import home as home_mod
+
+    return await home_mod.pulse(principal.principals)
+
+
+@app.get("/api/home/pin-preview")
+async def home_pin_preview(
+    widgetId: str, principal: Principal = Depends(current_principal)
+) -> dict[str, Any]:
+    from . import home as home_mod
+
+    return await home_mod.pin_preview(widgetId, principal.subject)
+
+
+@app.post("/api/home/pins", status_code=201)
+async def home_create_pin(
+    body: dict[str, Any] = Body(default={}), principal: Principal = Depends(current_principal)
+) -> dict[str, Any]:
+    from . import home as home_mod
+
+    widget_id = body.get("widgetId")
+    if not widget_id:
+        raise HTTPException(status_code=400, detail="widgetId required")
+    try:
+        pin = await home_mod.create_pin(
+            principal.subject,
+            widget_id=widget_id,
+            section_key=body.get("sectionKey") or "revenue",
+            schedule=body.get("schedule"),
+            watch=body.get("watch"),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    return {"id": str(pin["id"]), "title": pin["title"]}
+
+
+@app.delete("/api/home/pins/{pin_id}", status_code=204)
+async def home_delete_pin(
+    pin_id: str, principal: Principal = Depends(current_principal)
+) -> Response:
+    from . import home as home_mod
+
+    await home_mod.delete_pin(pin_id, principal.subject)
+    return Response(status_code=204)
+
+
+@app.post("/api/home/pins/{pin_id}/move")
+async def home_move_pin(
+    pin_id: str, body: dict[str, Any] = Body(default={}),
+    principal: Principal = Depends(current_principal),
+) -> dict[str, Any]:
+    from . import home as home_mod
+
+    ok = await home_mod.move_pin(
+        pin_id, principal.subject, body.get("sectionKey") or "revenue", int(body.get("ord") or 0)
+    )
+    return {"ok": ok}
+
+
+@app.post("/api/home/pins/{pin_id}/refresh")
+async def home_refresh_pin(
+    pin_id: str, principal: Principal = Depends(current_principal)
+) -> dict[str, Any]:
+    """A manual refresh, run as the caller — the same path a schedule takes."""
+    from . import ambient, home as home_mod
+    from .db import pool as _pool
+
+    row = await _pool().fetchrow(
+        """SELECT id, owner_subject, widget_id, canvas_id, title, watch
+           FROM home.pins WHERE id = $1 AND owner_subject = $2""",
+        __import__("uuid").UUID(pin_id), principal.subject,
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="not found")
+    result = await ambient.process_pin(dict(row), trigger="manual")
+    await events.notify_async(str(row["canvas_id"]))
+    return result
+
+
+@app.post("/api/home/sections/{section_id}/rename")
+async def home_rename_section(
+    section_id: str, body: dict[str, Any] = Body(default={}),
+    principal: Principal = Depends(current_principal),
+) -> dict[str, Any]:
+    from . import home as home_mod
+
+    ok = await home_mod.rename_section(section_id, principal.subject, body.get("title") or "")
+    return {"ok": ok}
+
+
+@app.post("/api/home/sections/{section_id}/grants")
+async def home_grant_section(
+    section_id: str, body: dict[str, Any] = Body(default={}),
+    principal: Principal = Depends(current_principal),
+) -> dict[str, Any]:
+    from . import home as home_mod
+
+    target = body.get("principal")
+    if not target:
+        raise HTTPException(status_code=400, detail="principal required")
+    ok = await home_mod.grant_section(section_id, principal.subject, target, principal.actor)
+    return {"ok": ok}
+
+
+@app.post("/api/home/findings/{finding_id}/dismiss", status_code=204)
+async def home_dismiss_finding(
+    finding_id: str, principal: Principal = Depends(current_principal)
+) -> Response:
+    from . import home as home_mod
+
+    await home_mod.dismiss_finding(finding_id, principal.subject)
+    return Response(status_code=204)
+
+
+@app.post("/api/home/findings/{finding_id}/act")
+async def home_act_finding(
+    finding_id: str, principal: Principal = Depends(current_principal)
+) -> dict[str, Any]:
+    from . import home as home_mod
+
+    result = await home_mod.act_on_finding(finding_id, principal.subject)
+    if result is None:
+        raise HTTPException(status_code=404, detail="not found")
+    return {"id": str(result["id"]), "pinId": str(result["pin_id"]) if result["pin_id"] else None}
+
+
 # ---- the agent turn --------------------------------------------------------------------------
 
 
@@ -621,7 +828,8 @@ async def chat(request: Request, body: dict[str, Any] = Body(default={})) -> Str
 
     async def stream():
         async for part in run_turn(
-            canvas_id, messages, lambda: events.notify(canvas_id), actor=principal.actor
+            canvas_id, messages, lambda: events.notify(canvas_id),
+            actor=principal.actor, principals=principal.principals,
         ):
             yield ui.frame(part)
         yield ui.DONE

@@ -1,0 +1,8 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "vision": "./app/graph_server.py:graph"
+  },
+  "env": ".env",
+  "python_version": "3.12"
+}

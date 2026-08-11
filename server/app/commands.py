@@ -141,7 +141,12 @@ def _numeric_leaves(kind: str, spec: dict[str, Any]) -> list[list[str]]:
                 out.append(["lines", str(i), "value"])
     elif kind == "table":
         for i, row in enumerate(spec.get("rows") or []):
-            for k, v in (row or {}).items():
+            # The model occasionally emits a bare number where a row object belongs;
+            # skip it rather than crash the whole turn on `.items()`. Spec validation
+            # surfaces the malformed row separately.
+            if not isinstance(row, dict):
+                continue
+            for k, v in row.items():
                 if num(v):
                     out.append(["rows", str(i), k])
     return out

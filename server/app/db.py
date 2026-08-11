@@ -276,6 +276,23 @@ async def init_db() -> None:
     async with _pool.acquire() as conn:
         await conn.execute(SCHEMA)
         await conn.execute(DOCUMENTS_SCHEMA)
+        # Home, the ambient agent, the re-executable data layer, and the mock
+        # warehouse. Imported here rather than at module scope so db.py stays free of
+        # domain imports — the DDL lives beside the queries that use it.
+        from .ambient import AMBIENT_SCHEMA
+        from .finance import SCHEMA as FINANCE_SCHEMA
+        from .home import SCHEMA as HOME_SCHEMA
+        from .queries import SCHEMA as QUERIES_SCHEMA
+
+        await conn.execute(QUERIES_SCHEMA)
+        await conn.execute(HOME_SCHEMA)
+        await conn.execute(FINANCE_SCHEMA)
+        await conn.execute(AMBIENT_SCHEMA)
+        # A fact used to be an orphan observation; now it can be the output of a run.
+        # Legacy facts keep query_id/run_id NULL, which is honest — they are one-off
+        # observations and a tile built only from them is snapshot-only.
+        await conn.execute("ALTER TABLE canvas.facts ADD COLUMN IF NOT EXISTS query_id UUID")
+        await conn.execute("ALTER TABLE canvas.facts ADD COLUMN IF NOT EXISTS run_id UUID")
         await conn.execute("ALTER TABLE canvas.canvases ADD COLUMN IF NOT EXISTS style JSONB")
         await conn.execute("ALTER TABLE canvas.widgets ADD COLUMN IF NOT EXISTS bindings JSONB")
         # A title or narrative is the model's CLAIM, not a retrieved figure — it gets a

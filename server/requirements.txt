@@ -8,6 +8,11 @@ xai-sdk>=1.17,<2.0
 langgraph>=0.2,<2.0
 langchain-core>=0.3,<2.0
 langchain-xai>=0.1,<2.0
+# LangGraph Server hosting. langgraph-cli[inmem] gives `langgraph dev` (local Studio,
+# in-memory checkpointer); langgraph-checkpoint-postgres backs durable interrupts in the
+# in-process runtime against the Postgres we already run. See app/graph_server.py.
+langgraph-cli[inmem]>=0.2,<1.0
+langgraph-checkpoint-postgres>=2.0,<3.0
 # Floor raised past the streaming-events redaction bypass (CVE-2026-41182). Traces
 # carry document page images, so client-side redaction is load-bearing here.
 langsmith>=0.7.31,<1.0
