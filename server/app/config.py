@@ -72,8 +72,18 @@ class Settings:
     ]
 
     # ---- identity ----------------------------------------------------------------
+    # AUTH_MODE is the switch: "oidc" or "disabled". Left unset it is derived from
+    # whether an issuer is configured, which is how this ran before the flag existed.
+    #
+    # It is a flag rather than an inference because the login handshake has not been
+    # exercised against a real identity provider yet. Setting it to "disabled" turns
+    # authentication off without unpicking the OIDC configuration, so a provider that
+    # misbehaves in production is one environment variable away from being bypassed
+    # rather than a config rollback.
+    auth_mode: str = (os.getenv("AUTH_MODE") or "").strip().lower()
+
     # Plain OIDC, so the provider is a URL: Okta, Entra, Auth0 and Google all work
-    # unchanged. Setting OIDC_ISSUER is what turns authentication on.
+    # unchanged.
     oidc_issuer: str = os.getenv("OIDC_ISSUER") or ""
     oidc_client_id: str = os.getenv("OIDC_CLIENT_ID") or ""
     oidc_client_secret: str = os.getenv("OIDC_CLIENT_SECRET") or ""
@@ -98,14 +108,43 @@ class Settings:
 
     @property
     def auth_enabled(self) -> bool:
-        """Authentication is on exactly when an issuer is configured.
+        """Whether requests are authenticated.
 
-        With it off every request runs as a single local principal, which is the only
-        way this stack runs on a laptop without an IdP. `main.py` logs a warning at
-        startup and `/api/health` reports the mode, because an unauthenticated
-        instance reachable from a network is an open document store.
+        `AUTH_MODE` decides when set; otherwise it falls back to whether an issuer is
+        configured. With authentication off every request runs as a single local
+        principal, which is the only way this stack runs on a laptop without an IdP —
+        `main.py` warns loudly at startup and `/api/health` reports the mode, because
+        an unauthenticated instance on a reachable port is an open document store.
         """
+        if self.auth_mode == "disabled":
+            return False
+        if self.auth_mode == "oidc":
+            return True
         return bool(self.oidc_issuer and self.oidc_client_id)
+
+    @property
+    def auth_configured(self) -> bool:
+        return bool(self.oidc_issuer and self.oidc_client_id)
+
+    @property
+    def auth_misconfiguration(self) -> str | None:
+        """Why the service must refuse to start, or None.
+
+        Asking for authentication and not getting it is the one outcome worth
+        crashing over: a typo in the issuer URL would otherwise leave a server that
+        looks configured, logs nothing alarming to an operator who believes it is
+        protected, and serves every document to anyone who asks.
+        """
+        if self.auth_mode and self.auth_mode not in ("oidc", "disabled"):
+            return f"AUTH_MODE must be 'oidc' or 'disabled', got {self.auth_mode!r}"
+        if self.auth_mode == "oidc" and not self.auth_configured:
+            return "AUTH_MODE=oidc but OIDC_ISSUER and OIDC_CLIENT_ID are not both set"
+        return None
+
+    @property
+    def auth_mode_source(self) -> str:
+        """For the startup line — whether the mode was chosen or inferred."""
+        return "AUTH_MODE" if self.auth_mode else "derived from OIDC_ISSUER"
 
 
 settings = Settings()

@@ -46,8 +46,11 @@ services:
       DOC_PAGE_DPI: ${DOC_PAGE_DPI:-}
       DOC_SHEET_DPI: ${DOC_SHEET_DPI:-}
       DOC_READ_DPI: ${DOC_READ_DPI:-}
-      # Unset OIDC_ISSUER runs the stack as a single local principal. Fine on a
-      # laptop, an open document store the moment the port is reachable.
+      # AUTH_MODE=oidc|disabled. Unset derives it from OIDC_ISSUER, which is how a
+      # laptop runs it — as a single local principal, and an open document store the
+      # moment the port is reachable. AUTH_MODE=oidc without a configured issuer
+      # refuses to start rather than serving unauthenticated.
+      AUTH_MODE: ${AUTH_MODE:-}
       OIDC_ISSUER: ${OIDC_ISSUER:-}
       OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
       OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}

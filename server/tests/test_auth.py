@@ -188,3 +188,87 @@ def test_actor_prefers_email_so_the_audit_trail_names_a_person():
 )
 def test_groups_resolve_to_a_role(groups, expected):
     assert role_for_groups(groups) == expected
+
+
+# ---- the AUTH_MODE flag ------------------------------------------------------------
+# The login handshake has not been exercised against a real identity provider, so the
+# switch that turns it off matters as much as the one that turns it on. These pin the
+# resolution matrix, and in particular that no combination yields a server which
+# believes it is protected while serving everyone.
+
+import importlib
+
+import app.config
+
+
+def settings_with(monkeypatch, **env):
+    for key in ("AUTH_MODE", "OIDC_ISSUER", "OIDC_CLIENT_ID"):
+        monkeypatch.delenv(key, raising=False)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    return importlib.reload(app.config).settings
+
+
+@pytest.fixture(autouse=True)
+def _restore_config():
+    yield
+    importlib.reload(app.config)
+
+
+@pytest.mark.parametrize(
+    "env,enabled",
+    [
+        ({}, False),
+        ({"OIDC_ISSUER": ISSUER, "OIDC_CLIENT_ID": CLIENT}, True),
+        ({"OIDC_ISSUER": ISSUER}, False),
+    ],
+)
+def test_mode_unset_falls_back_to_whether_oidc_is_configured(monkeypatch, env, enabled):
+    assert settings_with(monkeypatch, **env).auth_enabled is enabled
+
+
+def test_disabled_overrides_a_configured_provider(monkeypatch):
+    """The kill switch: turn authentication off without unpicking the config."""
+    s = settings_with(
+        monkeypatch, AUTH_MODE="disabled", OIDC_ISSUER=ISSUER, OIDC_CLIENT_ID=CLIENT
+    )
+    assert s.auth_enabled is False
+    assert s.auth_configured is True
+    assert s.auth_misconfiguration is None
+
+
+def test_oidc_mode_turns_it_on(monkeypatch):
+    s = settings_with(monkeypatch, AUTH_MODE="oidc", OIDC_ISSUER=ISSUER, OIDC_CLIENT_ID=CLIENT)
+    assert s.auth_enabled is True
+    assert s.auth_misconfiguration is None
+
+
+def test_asking_for_oidc_without_configuring_it_refuses_to_start(monkeypatch):
+    """The failure that matters. A typo'd issuer must not leave a server that looks
+    protected to its operator and serves every document to anyone."""
+    s = settings_with(monkeypatch, AUTH_MODE="oidc")
+    assert s.auth_misconfiguration is not None
+    assert "OIDC_ISSUER" in s.auth_misconfiguration
+
+
+def test_a_missing_client_id_also_refuses(monkeypatch):
+    s = settings_with(monkeypatch, AUTH_MODE="oidc", OIDC_ISSUER=ISSUER)
+    assert s.auth_misconfiguration is not None
+
+
+@pytest.mark.parametrize("value", ["on", "true", "1", "enabled", "okta", "off"])
+def test_an_unrecognised_mode_refuses_rather_than_guessing(monkeypatch, value):
+    """'true' looking like 'on' and silently meaning 'disabled' is the worst case."""
+    s = settings_with(monkeypatch, AUTH_MODE=value, OIDC_ISSUER=ISSUER, OIDC_CLIENT_ID=CLIENT)
+    assert s.auth_misconfiguration is not None
+
+
+@pytest.mark.parametrize("value", ["OIDC", " oidc ", "Disabled"])
+def test_the_mode_is_case_and_whitespace_insensitive(monkeypatch, value):
+    s = settings_with(monkeypatch, AUTH_MODE=value, OIDC_ISSUER=ISSUER, OIDC_CLIENT_ID=CLIENT)
+    assert s.auth_misconfiguration is None
+
+
+def test_the_startup_line_says_where_the_mode_came_from(monkeypatch):
+    assert settings_with(monkeypatch, AUTH_MODE="disabled").auth_mode_source == "AUTH_MODE"
+    assert "OIDC_ISSUER" in settings_with(monkeypatch).auth_mode_source

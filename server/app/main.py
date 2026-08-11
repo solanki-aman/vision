@@ -71,6 +71,12 @@ RENDER_SUBJECT = "service:shooter"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Before anything else: an operator who asked for authentication must not get a
+    # silently unauthenticated server because an issuer URL had a typo in it.
+    problem = settings.auth_misconfiguration
+    if problem:
+        raise RuntimeError(f"refusing to start — {problem}")
+
     await init_db()
     await objects.ensure_bucket()
     await purge_expired_sessions()
@@ -81,16 +87,21 @@ async def lifespan(app: FastAPI):
             log.info("granted %d pre-existing canvas(es) to the bootstrap subject", granted)
     if not settings.auth_enabled:
         log.warning(
-            "AUTHENTICATION IS OFF — every request runs as a single local principal. "
-            "Set OIDC_ISSUER and OIDC_CLIENT_ID before exposing this port; documents "
-            "are readable by anyone who can reach it."
+            "AUTHENTICATION IS OFF (%s) — every request runs as a single local "
+            "principal. Set AUTH_MODE=oidc with OIDC_ISSUER and OIDC_CLIENT_ID before "
+            "exposing this port; documents are readable by anyone who can reach it.%s",
+            settings.auth_mode_source,
+            " OIDC is configured but AUTH_MODE=disabled is overriding it."
+            if settings.auth_configured
+            else "",
         )
     log.info(
-        "vision server ready on :%s (%s, effort=%s, auth=%s)%s",
+        "vision server ready on :%s (%s, effort=%s, auth=%s via %s)%s",
         settings.port,
         settings.xai_model,
         settings.xai_reasoning_effort,
         "oidc" if settings.auth_enabled else "disabled",
+        settings.auth_mode_source,
         f" · tracing → LangSmith project {settings.langsmith_project!r}"
         f" (image redaction: {redaction})"
         if settings.langsmith_tracing
@@ -250,7 +261,11 @@ async def me(principal: Principal = Depends(current_principal)) -> dict[str, Any
 
 @app.get("/api/health")
 async def health() -> dict[str, Any]:
-    return {"ok": True, "model": settings.xai_model, "auth": "oidc" if settings.auth_enabled else "disabled"}
+    return {
+        "ok": True,
+        "model": settings.xai_model,
+        "auth": "oidc" if settings.auth_enabled else "disabled",
+    }
 
 
 @app.get("/api/canvases")
