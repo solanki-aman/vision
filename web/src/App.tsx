@@ -12,7 +12,10 @@ import { DocumentProvider, useDocumentStore } from "./DocumentContext";
 import { AttachButton, AttachmentChips, useComposerDrop } from "./Attachments";
 import { PagePreview } from "./PagePreview";
 import { ShareDialog } from "./ShareDialog";
-import type { CanvasState, CanvasStyle, Fact } from "./types";
+import { Home } from "./Home";
+import { HomeIcon } from "./Icons";
+import { PinDialog } from "./PinDialog";
+import type { CanvasState, CanvasStyle, Fact, Widget } from "./types";
 
 interface CanvasListItem {
   id: string;
@@ -28,7 +31,7 @@ const PROMPTS = [
   "Compare the last four SpaceX launch cadences",
 ];
 
-function CanvasView({ canvasId, onTitle }: { canvasId: string; onTitle: (t: string) => void }) {
+function CanvasView({ canvasId, onTitle, initialPrompt }: { canvasId: string; onTitle: (t: string) => void; initialPrompt?: string | null }) {
   const [state, setState] = useState<CanvasState>({ canvas: null, widgets: [] });
   const [facts, setFacts] = useState<Record<string, Fact>>({});
   const { chart: chartTheme, mode } = useTheme();
@@ -39,6 +42,7 @@ function CanvasView({ canvasId, onTitle }: { canvasId: string; onTitle: (t: stri
   const docs = useDocumentStore(canvasId);
   const { over: dropping, dropProps } = useComposerDrop(docs.upload);
   const refreshDocs = docs.refresh;
+  const [pinTarget, setPinTarget] = useState<Widget | null>(null);
 
   const refetch = useCallback(async () => {
     const res = await fetch(`/api/canvases/${canvasId}`);
@@ -101,6 +105,16 @@ function CanvasView({ canvasId, onTitle }: { canvasId: string; onTitle: (t: stri
     sendMessage({ text });
     setInput("");
   };
+
+  // A prompt typed into the Home generate box: fire it once the chat surface is ready
+  // and the (empty) history has loaded, so the answer streams onto this fresh canvas.
+  const fired = useRef(false);
+  useEffect(() => {
+    if (fired.current || !initialPrompt || initial === null) return;
+    if (messages.length > 0) { fired.current = true; return; }
+    fired.current = true;
+    sendMessage({ text: initialPrompt });
+  }, [initialPrompt, initial, messages.length, sendMessage]);
 
   const applyOps = useCallback(
     (operations: any[]) => {
@@ -241,6 +255,7 @@ function CanvasView({ canvasId, onTitle }: { canvasId: string; onTitle: (t: stri
           revealY={revealY}
           onLayoutChange={applyOps}
           onRemove={(widgetId) => applyOps([{ kind: "remove_widget", widgetId }])}
+          onPin={(w) => setPinTarget(w)}
         />
         {busy && empty && (
           <div className="board-empty">
@@ -306,6 +321,13 @@ function CanvasView({ canvasId, onTitle }: { canvasId: string; onTitle: (t: stri
       </div>
 
       {docs.target && <PagePreview target={docs.target} onClose={docs.close} />}
+      {pinTarget && (
+        <PinDialog
+          widget={pinTarget}
+          onClose={() => setPinTarget(null)}
+          onPinned={() => setPinTarget(null)}
+        />
+      )}
     </div>
     </DocumentProvider>
     </FilterProvider>
@@ -366,6 +388,11 @@ export default function App() {
   const [navOpen, setNavOpen] = useState(false);
   const [setOpen, setSetOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  // Home is the default surface. The canvas workspace is where questions get asked.
+  const [view, setView] = useState<"home" | "canvas">("home");
+  // A prompt carried over from the Home generate box, bound to the canvas it created
+  // so it can never fire into a different canvas opened later.
+  const [pendingPrompt, setPendingPrompt] = useState<{ id: string; text: string } | null>(null);
   const { mode, set } = useTheme();
 
   const [exportOpen, setExportOpen] = useState(false);
@@ -411,49 +438,60 @@ export default function App() {
     refreshList();
   }, [refreshList, active, title]);
 
-  const create = useCallback(async () => {
+  const openCanvas = useCallback(
+    (id: string, canvasTitle?: string) => {
+      setActive(id);
+      if (canvasTitle !== undefined) setTitle(canvasTitle);
+      setView("canvas");
+      setNavOpen(false);
+      if (canvasTitle === undefined) {
+        fetch(`/api/canvases/${id}`)
+          .then((r) => r.json())
+          .then((d) => d?.canvas?.title && setTitle(d.canvas.title))
+          .catch(() => {});
+      }
+    },
+    [],
+  );
+
+  const create = useCallback(async (firstPrompt?: string) => {
     const res = await fetch("/api/canvases", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: "{}",
     });
     const c = await res.json();
-    setTitle(c.title);
-    setActive(c.id);
-    setNavOpen(false);
+    setPendingPrompt(firstPrompt ? { id: c.id, text: firstPrompt } : null);
+    openCanvas(c.id, c.title);
     refreshList();
-  }, [refreshList]);
+  }, [refreshList, openCanvas]);
 
-  // Resume the most recent canvas on load; only create when there is nothing to open.
+  // A ?canvas= deep link opens straight into that canvas; otherwise Home is the
+  // landing surface — a place you read, not a canvas resumed under you.
   const booted = useRef(false);
   useEffect(() => {
     if (booted.current) return;
     booted.current = true;
     const deep = new URLSearchParams(location.search).get("canvas");
-    if (deep) {
-      setActive(deep);
-      fetch(`/api/canvases/${deep}`)
-        .then((r) => r.json())
-        .then((d) => d?.canvas?.title && setTitle(d.canvas.title))
-        .catch(() => {});
-      return;
-    }
-    fetch("/api/canvases")
-      .then((r) => r.json())
-      .then((list: CanvasListItem[]) => {
-        if (list.length) {
-          setActive(list[0].id);
-          setTitle(list[0].title);
-        } else {
-          create();
-        }
-      });
-  }, [create]);
+    if (deep) openCanvas(deep);
+  }, [openCanvas]);
+
+  if (view === "home") {
+    return (
+      <Home
+        onOpenCanvas={(id) => openCanvas(id)}
+        onCreate={(text) => create(text)}
+      />
+    );
+  }
 
   return (
     <div className="app">
       <div className="veil" aria-hidden />
       <header className="topbar">
+        <button className="home-back" title="Home" onClick={() => setView("home")}>
+          <HomeIcon size={16} />
+        </button>
         <button className="mark" onClick={() => setNavOpen((v) => !v)}>
           <span className="mark-glyph">◈</span> VISION
         </button>
@@ -503,7 +541,7 @@ export default function App() {
             <GearIcon />
           </button>
           <button onClick={() => active && fetch(`/api/canvases/${active}/undo`, { method: "POST" })}>undo</button>
-          <button className="primary" onClick={create}>
+          <button className="primary" onClick={() => create()}>
             new canvas
           </button>
         </div>
@@ -536,7 +574,14 @@ export default function App() {
 
       {shareOpen && active && <ShareDialog canvasId={active} onClose={() => setShareOpen(false)} />}
 
-      {active && <CanvasView key={active} canvasId={active} onTitle={setTitle} />}
+      {active && (
+        <CanvasView
+          key={active}
+          canvasId={active}
+          onTitle={setTitle}
+          initialPrompt={pendingPrompt?.id === active ? pendingPrompt.text : null}
+        />
+      )}
     </div>
   );
 }

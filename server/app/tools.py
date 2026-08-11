@@ -6,7 +6,7 @@ surgical chart edits. Handlers never write storage directly — they call
 ``apply_change_set`` / ``apply_layout`` / ``apply_lanes``.
 """
 
-from typing import Any, Awaitable, Callable, Literal
+from typing import Any, Awaitable, Callable, Literal, Sequence
 
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, ConfigDict, Field
@@ -222,6 +222,42 @@ class WebSearchInput(ToolInput):
     )
 
 
+class WarehouseProjection(ToolInput):
+    kind: Literal["scalar", "series"] = Field(
+        default="series",
+        description="series for a chart (one point per row), scalar for a single KPI number.",
+    )
+    label: str = Field(description="What this fact measures, e.g. 'Revenue by region'.")
+    unit: str | None = Field(default=None, description="e.g. 'USD', '%'.")
+    x: str | None = Field(
+        default=None,
+        description="For a series: the row column to use as the x label, e.g. 'region_name' or 'month'.",
+    )
+    y: str = Field(
+        description="The row column carrying the number, e.g. 'revenue', 'gross_margin_pct'.",
+    )
+    agg: Literal["sum", "avg", "last"] = Field(
+        default="sum", description="For a scalar: how to reduce the rows to one number.",
+    )
+
+
+class WarehouseQueryInput(ToolInput):
+    op: str = Field(
+        description=(
+            "The named warehouse operation to run. One of: revenue_by_region, revenue_trend, "
+            "margin_by_segment, margin_trend_by_region, pnl_summary, headcount_by_function. "
+            "These are the only figures that count as entitled internal data — a tile built "
+            "from them refreshes and re-checks the viewer's access on every read."
+        )
+    )
+    months: int | None = Field(
+        default=None, description="How many trailing months to cover (defaults per op).",
+    )
+    project: WarehouseProjection = Field(
+        description="How to turn the returned rows into a bindable fact.",
+    )
+
+
 class ComputeVar(ToolInput):
     name: str = Field(
         description="A short, self-explanatory variable name the code uses, e.g. 'q1_rev' or "
@@ -352,7 +388,10 @@ class TurnFlags:
 
 
 def build_tools(
-    canvas_id: str, on_change: Callable[[], None], turn: TurnFlags
+    canvas_id: str,
+    on_change: Callable[[], None],
+    turn: TurnFlags,
+    principals: Sequence[str] = ("user:local-user",),
 ) -> list[StructuredTool]:
     async def place(op: dict[str, Any]) -> dict[str, Any]:
         if op["kind"] == "add_widget":
@@ -518,6 +557,48 @@ def build_tools(
             ],
         }
 
+    async def run_warehouse_query(args: dict[str, Any]) -> dict[str, Any]:
+        """Run a registered warehouse op under the caller's entitlements and store the
+        result as an entitled, re-executable fact.
+
+        Unlike web_search, the fact this produces carries a query_id — so a widget bound
+        to it can be pinned and refreshed, and resolves per viewer when shared."""
+        from . import queries
+
+        project = dict(args.get("project") or {})
+        params = {"args": {"months": args.get("months")} if args.get("months") else {},
+                  "project": project}
+        params["args"] = {k: v for k, v in params["args"].items() if v is not None}
+        query = await queries.ensure_query(
+            canvas_id, source="warehouse", op=args["op"], params=params
+        )
+        result = await queries.run_query(query, principals)
+        if result.status == "failed":
+            return {"ok": False, "errors": [result.error or "warehouse query failed"]}
+        if result.status == "denied":
+            return {
+                "ok": False,
+                "errors": ["you are not entitled to any of this data"],
+                "withheld": result.withheld,
+            }
+        for f in result.facts:
+            f["queryLabel"] = args["op"]
+        stored = await queries.record_run_facts(
+            canvas_id, query["id"], result.run_id, result.facts
+        )
+        on_change()
+        return {
+            "ok": True,
+            "accessClass": query["access_class"],
+            "withheld": result.withheld or None,
+            "asOf": result.as_of,
+            "facts": [
+                {"factId": s["factId"], "label": s.get("label"),
+                 "value": s.get("value"), "kind": s.get("kind")}
+                for s in stored
+            ],
+        }
+
     async def run_code_execution(args: dict[str, Any]) -> dict[str, Any]:
         specs = args.get("inputs") or []
         ids = [s["factId"] for s in specs]
@@ -600,6 +681,16 @@ def build_tools(
             "measured number you build to one of those factIds instead of typing it.",
             WebSearchInput,
             run_web_search,
+        ),
+        tool(
+            "warehouse_query",
+            "Pull a figure from the internal finance warehouse — revenue, margin, P&L, headcount "
+            "— as governed, entitled data. Use this INSTEAD of web_search for company financials: "
+            "unlike a searched number, a warehouse fact can be pinned to Home and refreshed, and it "
+            "re-checks the viewer's access when a tile is shared. Returns factIds you bind like any "
+            "other. The result is entitlement-filtered to the caller and may report withheld dimensions.",
+            WarehouseQueryInput,
+            run_warehouse_query,
         ),
         tool(
             "code_execution",

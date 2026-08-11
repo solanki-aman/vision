@@ -82,6 +82,36 @@ services:
       - ./server/tests:/app/tests
       - ./server/pytest.ini:/app/pytest.ini
 
+  # The ambient worker: the only process that makes an ambient model call. Same image
+  # as the server, different entrypoint, no HTTP port. Kill switch is a stopped
+  # container; ambient cost is attributable to this one process.
+  worker:
+    build: ./server
+    command: ["python", "-m", "app.worker"]
+    environment:
+      DATABASE_URL: postgres://vision:vision@postgres:5432/vision
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: vision
+      MINIO_SECRET_KEY: vision-secret
+      MINIO_BUCKET: documents
+      XAI_API_KEY: ${XAI_API_KEY:-}
+      XAI_MODEL: ${XAI_MODEL:-grok-4.5}
+      XAI_REASONING_EFFORT: ${XAI_REASONING_EFFORT:-low}
+      # Off by default (like AUTH_MODE): a capability that spends money with no human
+      # present is switched on deliberately. Set AMBIENT_ENABLED=1 to run the loop.
+      AMBIENT_ENABLED: ${AMBIENT_ENABLED:-}
+      AMBIENT_TICK_SECONDS: ${AMBIENT_TICK_SECONDS:-60}
+      AMBIENT_MAX_RUNG: ${AMBIENT_MAX_RUNG:-1}
+      AMBIENT_DELTA_K: ${AMBIENT_DELTA_K:-1.5}
+      AMBIENT_BRIEF_BUDGET: ${AMBIENT_BRIEF_BUDGET:-3}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    volumes:
+      - ./server/app:/app/app
+
   shooter:
     build: ./shooter
     environment:

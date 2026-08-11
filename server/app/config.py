@@ -33,6 +33,27 @@ class Settings:
     # A building turn can fan out across many tool calls; cap it like the prototype did.
     max_steps: int = int(os.getenv("AGENT_MAX_STEPS", "16"))
 
+    # ---- ambient agent -----------------------------------------------------------
+    # Off by default, following the AUTH_MODE precedent: a capability that spends money
+    # without a human present is switched on deliberately, not inferred. The worker
+    # process reads these; the web process ignores them.
+    ambient_enabled: bool = (os.getenv("AMBIENT_ENABLED") or "").lower() in ("1", "true", "yes")
+    ambient_tick_seconds: int = int(os.getenv("AMBIENT_TICK_SECONDS") or "60")
+    # The ladder ceiling. An org that wants noticing but no writing sets this to 1 or 2
+    # and rungs 3-4 are unreachable regardless of what any prompt says.
+    ambient_max_rung: int = int(os.getenv("AMBIENT_MAX_RUNG") or "1")
+    ambient_concurrency: int = int(os.getenv("AMBIENT_CONCURRENCY") or "2")
+    # Findings compete for this many slots in the daily brief. Fixed, not a preference
+    # (D-5): everyone sets a preference to ten and then stops reading.
+    ambient_brief_budget: int = int(os.getenv("AMBIENT_BRIEF_BUDGET") or "3")
+    # A separate counter from the interactive budget (D-8), and the first thing shed
+    # under pressure — a busy ambient morning must never degrade the interactive path.
+    ambient_daily_tokens: int = int(os.getenv("AMBIENT_DAILY_TOKENS") or "200000")
+    # A refresh escalates to a model call only if a figure moved by more than this
+    # multiple of its own recent volatility (§7). Below it, freshness is bumped and no
+    # model runs — which is the whole cost story.
+    ambient_delta_k: float = float(os.getenv("AMBIENT_DELTA_K") or "1.5")
+
     # ---- documents ---------------------------------------------------------------
     # Uploaded files are rasterised and read as images; see app/documents.py for why,
     # and for the measurements these defaults come from.
