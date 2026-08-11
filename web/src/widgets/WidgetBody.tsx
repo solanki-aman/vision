@@ -143,7 +143,19 @@ function Sparkline({ points, color }: { points: number[]; color?: string }) {
   );
 }
 
-function Kpi({ spec, accent, fact, facts }: { spec: KpiSpec; accent?: string; fact?: Fact; facts?: Record<string, Fact> }) {
+function Kpi({
+  spec,
+  accent,
+  fact,
+  facts,
+  title,
+}: {
+  spec: KpiSpec;
+  accent?: string;
+  fact?: Fact;
+  facts?: Record<string, Fact>;
+  title: string;
+}) {
   const c = spec.comparison;
   const delta = c ? spec.value - c.baseline : 0;
   const pct = c && c.baseline !== 0 ? (delta / Math.abs(c.baseline)) * 100 : null;
@@ -158,7 +170,12 @@ function Kpi({ spec, accent, fact, facts }: { spec: KpiSpec; accent?: string; fa
         <span>{fmt(spec.value)}</span>
         {spec.unit && <span className="kpi-unit">{spec.unit}</span>}
         {fact && facts && (
-          <ProvBadge facts={[fact]} all={facts} headline={`${fmt(spec.value)}${spec.unit ? ` ${spec.unit}` : ""}`} />
+          <ProvBadge
+            facts={[fact]}
+            all={facts}
+            headline={`${fmt(spec.value)}${spec.unit ? ` ${spec.unit}` : ""}`}
+            widgetTitle={title}
+          />
         )}
       </div>
       <div className="kpi-label" title={spec.label}>
@@ -303,6 +320,7 @@ export function WidgetBody({
           accent={matchEntity(`${widget.title} ${(widget.spec as KpiSpec).label ?? ""}`, entities)}
           fact={facts && factAt(widget.bindings, facts, "value")}
           facts={facts}
+          title={widget.title}
         />
       );
     case "table":

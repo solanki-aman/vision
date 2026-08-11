@@ -1,5 +1,9 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useId, useRef, useState } from "react";
+import { RESTRICTED, parseDocUrl, useCitedDocument, useDocuments } from "./DocumentContext";
 import type { Fact } from "./types";
+
+/** The widget whose drill-down is open, so a page preview it opens can name it. */
+const CitedByCtx = createContext<string | undefined>(undefined);
 
 function fmtNum(v?: number | null): string {
   if (v === null || v === undefined) return "—";
@@ -36,7 +40,51 @@ function CodeIcon() {
   );
 }
 
+function FileIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width={13} height={13} fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M14 3H7a1.6 1.6 0 0 0-1.6 1.6v14.8A1.6 1.6 0 0 0 7 21h10a1.6 1.6 0 0 0 1.6-1.6V7.6Z" />
+      <path d="M14 3v4.6h4.6" />
+    </svg>
+  );
+}
+
+/** A fact that came off a page of paper. The chip opens the page itself — a
+ * quoted sentence would be the weaker evidence this design replaced (§5). */
+function DocSource({ cited, asOf }: { cited: { docId: string; page: number }; asOf?: string | null }) {
+  const { open } = useDocuments();
+  const citedBy = useContext(CitedByCtx);
+  const doc = useCitedDocument(cited.docId);
+
+  // The number is still on the canvas; the paper behind it is not shared. Say
+  // that plainly rather than offering a chip that 404s (§12).
+  if (doc === RESTRICTED) {
+    return (
+      <div className="dd-src dd-src-restricted">
+        <FileIcon /> source restricted by uploader
+      </div>
+    );
+  }
+
+  const filename = doc ? doc.filename : "document";
+  return (
+    <div className="dd-src">
+      {asOf ? `as of ${asOf}` : ""}
+      <button
+        className="doc-cite"
+        title={`Open ${filename} at page ${cited.page}`}
+        onClick={() => open({ ...cited, citedBy })}
+      >
+        <FileIcon /> {filename} p{cited.page}
+      </button>
+    </div>
+  );
+}
+
 function Source({ f }: { f: Fact }) {
+  const cited = parseDocUrl(f.sourceUrl);
+  if (cited) return <DocSource cited={cited} asOf={f.asOf} />;
+
   const d = domain(f.sourceUrl);
   if (!d && !f.asOf) return null;
   return (
@@ -53,11 +101,18 @@ function Source({ f }: { f: Fact }) {
 }
 
 function Retrieved({ f }: { f: Fact }) {
-  const label = f.tool === "x_search" ? "retrieved · X search" : f.tool === "user" ? "provided · by you" : "retrieved · web search";
+  const fromPaper = f.tool === "document";
+  const label = fromPaper
+    ? "read · from your document"
+    : f.tool === "x_search"
+      ? "retrieved · X search"
+      : f.tool === "user"
+        ? "provided · by you"
+        : "retrieved · web search";
   return (
     <div className="dd-section">
       <div className="dd-section-head">
-        <SearchIcon /> {label}
+        {fromPaper ? <FileIcon /> : <SearchIcon />} {label}
       </div>
       {f.query && <div className="dd-query">{f.query}</div>}
       {f.snippet && <p className="dd-quote">“{f.snippet}”</p>}
@@ -123,6 +178,7 @@ export function ProvBadge({
   all,
   headline,
   claimFacts = [],
+  widgetTitle,
 }: {
   facts: Fact[];
   all: Record<string, Fact>;
@@ -130,6 +186,8 @@ export function ProvBadge({
   headline?: string;
   /** Facts the widget's title/prose was written from — sources for a claim, not a value. */
   claimFacts?: Fact[];
+  /** Named in the page preview a document citation opens, so the page says what cited it. */
+  widgetTitle?: string;
 }) {
   const [open, setOpen] = useState(false);
   const titleId = useId();
@@ -205,6 +263,7 @@ export function ProvBadge({
         </svg>
       </button>
       {open && (
+        <CitedByCtx.Provider value={widgetTitle}>
         <div className="dd-overlay" onClick={() => setOpen(false)}>
           <div
             className="dd-modal"
@@ -245,6 +304,7 @@ export function ProvBadge({
             </div>
           </div>
         </div>
+        </CitedByCtx.Provider>
       )}
     </span>
   );

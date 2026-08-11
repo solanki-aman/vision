@@ -228,6 +228,7 @@ export function Canvas({ widgets, entities, facts, revealY, onLayoutChange, onRe
                   facts={boundFactsFor(w, facts)}
                   claimFacts={claimFactsFor(w, facts, boundFactsFor(w, facts))}
                   all={facts}
+                  widgetTitle={w.title}
                 />
               </footer>
             )}

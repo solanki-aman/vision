@@ -1181,6 +1181,291 @@ body {
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* ---------- documents ---------- */
+/* the composer as a drop target */
+.bar.dropping {
+  position: relative;
+  border-color: var(--accent);
+  box-shadow: var(--glow), var(--shadow-lg);
+}
+.bar-drop {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 15px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  color: var(--accent-ink);
+  font: 500 12px var(--mono);
+  letter-spacing: 0.04em;
+  pointer-events: none;
+}
+
+.bar .attach {
+  width: 30px;
+  height: 34px;
+  background: none;
+  color: var(--faint);
+  border-radius: 9px;
+}
+.bar .attach:hover:not(:disabled) { color: var(--accent); background: var(--hover); filter: none; }
+
+/* attachment chips, above the composer */
+.doc-strip {
+  pointer-events: auto;
+  width: min(720px, 100%);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.doc-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  font: 400 11.5px var(--mono);
+  color: var(--ink-2);
+}
+.doc-chip-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  padding: 6px 4px 6px 11px;
+  border-radius: 999px 0 0 999px;
+}
+.doc-chip-open:disabled { cursor: default; }
+.doc-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.doc-chip em { color: var(--faint); font-style: normal; flex: none; }
+.doc-chip-mark { color: #0ca30c; flex: none; }
+.doc-chip .spin { flex: none; width: 10px; height: 10px; border-width: 1.5px; }
+.doc-chip-x {
+  background: none;
+  border: none;
+  color: var(--faint);
+  cursor: pointer;
+  font-size: 10px;
+  padding: 6px 10px 6px 6px;
+  border-radius: 0 999px 999px 0;
+}
+.doc-chip-x:hover { color: var(--ink); }
+/* pending: the pages are stored but not yet rasterised, so it isn't usable yet */
+.doc-chip-pending { opacity: 0.55; }
+.doc-chip-failed {
+  border-color: rgba(208, 59, 59, 0.34);
+  background: rgba(208, 59, 59, 0.09);
+  color: #b3261e;
+}
+.doc-chip-failed .doc-chip-mark { color: #b3261e; }
+.doc-chip-flat { padding: 6px 11px; }
+
+/* page preview — above the provenance drill-down it can be opened from */
+.doc-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(10, 10, 12, 0.55);
+  backdrop-filter: blur(3px);
+  animation: fade 0.16s ease;
+}
+.doc-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(860px, 100%);
+  max-height: 90vh;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  animation: rise 0.2s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+.doc-title {
+  font: 600 15px/1.3 system-ui;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.doc-original {
+  flex: none;
+  font: 400 10.5px/1.5 var(--mono);
+  color: var(--accent-ink);
+  text-decoration: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 3px 10px;
+}
+.doc-original:hover { border-color: var(--accent); background: var(--accent-wash); }
+
+.doc-sheet {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: var(--page-2);
+}
+.doc-sheet img {
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #fff;
+  box-shadow: var(--shadow-md);
+  display: block;
+}
+.doc-blocked {
+  font: 400 12px/1.6 var(--mono);
+  color: var(--muted);
+  padding: 48px 20px;
+  text-align: center;
+}
+
+.doc-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 9px 14px;
+  border-top: 1px solid var(--line-soft);
+}
+.doc-bar button {
+  background: none;
+  border: none;
+  color: var(--ink-2);
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  font-size: 16px;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+.doc-bar button:hover:not(:disabled) { background: var(--hover); color: var(--ink); }
+.doc-bar button:disabled { opacity: 0.3; cursor: default; }
+.doc-count { font: 500 11px var(--mono); color: var(--muted); padding: 0 8px; }
+.doc-jump {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font: 400 10.5px var(--mono);
+  color: var(--faint);
+}
+.doc-jump input {
+  width: 52px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--page);
+  color: var(--ink);
+  padding: 4px 7px;
+  font: 400 11px var(--mono);
+  text-align: center;
+  outline: none;
+}
+.doc-jump input:focus { border-color: var(--accent); box-shadow: var(--glow); }
+
+.doc-cited {
+  padding: 8px 14px 11px;
+  border-top: 1px solid var(--line-soft);
+  font: 400 10.5px/1.5 var(--mono);
+  color: var(--faint);
+}
+.doc-cited strong { color: var(--ink-2); font-weight: 500; }
+
+/* a document citation inside the provenance drill-down */
+.doc-cite {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--accent-wash);
+  border: none;
+  border-radius: 6px;
+  color: var(--accent-ink);
+  font: 400 10.5px/1.5 var(--mono);
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.doc-cite:hover { filter: brightness(1.06); text-decoration: underline; }
+/* the evidence is withheld, the number is not — never a chip that looks live */
+.dd-src-restricted {
+  color: var(--muted);
+  font-style: italic;
+  gap: 5px;
+}
+
+/* ---------- share consent ---------- */
+.share-who { display: flex; gap: 8px; }
+.share-principal {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--page);
+  color: var(--ink);
+  padding: 8px 11px;
+  font: 400 12.5px system-ui;
+  outline: none;
+}
+.share-principal:focus { border-color: var(--accent); box-shadow: var(--glow); }
+.share-who select {
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--page);
+  color: var(--ink-2);
+  padding: 8px 9px;
+  font: 400 12.5px system-ui;
+  outline: none;
+}
+
+.share-docs { display: flex; flex-direction: column; gap: 8px; }
+.share-doc {
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--page-2);
+  padding: 10px 11px;
+}
+.share-doc-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.share-doc-head strong { font-size: 12.5px; font-weight: 600; color: var(--ink); }
+.share-doc-head em { font: 400 10.5px var(--mono); font-style: normal; color: var(--faint); }
+.share-doc-choice { display: flex; gap: 7px; flex-wrap: wrap; }
+.share-doc-choice label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 11px;
+  font-size: 11.5px;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.share-doc-choice label:hover { border-color: var(--muted); }
+.share-doc-choice label.on { border-color: var(--accent); background: var(--accent-wash); color: var(--accent-ink); }
+.share-doc-choice input { accent-color: var(--accent); margin: 0; }
+
+.share-error {
+  font: 400 11.5px var(--mono);
+  color: #b3261e;
+  background: rgba(208, 59, 59, 0.09);
+  border: 1px solid rgba(208, 59, 59, 0.3);
+  border-radius: 8px;
+  padding: 7px 10px;
+  margin-bottom: 9px;
+}
+.share-done { font: 400 12px var(--mono); color: #0ca30c; margin-bottom: 9px; }
+.btn:disabled { opacity: 0.4; cursor: default; filter: none; }
+
 /* per-canvas card treatments */
 .stage { background: var(--page); }
 .stage[data-cards="flat"] .widget {
