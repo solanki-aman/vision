@@ -344,6 +344,11 @@ class TurnFlags:
     def __init__(self) -> None:
         self.mutated = False
         self.laid_out = False
+        # Documents looked at this turn, and those the model wrote a digest for.
+        # A turn that reads a document but forgets to summarise it gets one backfilled
+        # in run_turn's finally, the same way a missing set_layout gets normalised.
+        self.viewed_docs: set[str] = set()
+        self.digested: set[str] = set()
 
 
 def build_tools(
